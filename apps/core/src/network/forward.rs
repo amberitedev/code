@@ -174,6 +174,7 @@ impl Network {
         let Some(local) =
             public_ip::local_ipv4().filter(|ip| is_private(IpAddr::V4(*ip)))
         else {
+            *self.connect_port.lock().expect("not poisoned") = None;
             return;
         };
         let granted = match self

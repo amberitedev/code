@@ -39,7 +39,7 @@ use sharing_client::net::CoreAddress;
 
 use self::{
     sessions::{Key, Sessions},
-    tunnel::{Dialers, Tunnel},
+    tunnel::{Dialers, Tunnel, Unanswered},
 };
 use crate::local_api::endpoints::cores::{
     CheckCoreSession, ConnectCore, CoreRoute, CoreTarget, SignInToCore,
@@ -131,7 +131,7 @@ impl Cores {
                         .filter(|address| on_own_network(address.ip()));
                     let answered = match own {
                         Some(address) => {
-                            tunnel.dial(&[address], LOCAL_ANSWER).await
+                            tunnel.dial_here(address, LOCAL_ANSWER).await
                         }
                         None => false,
                     };
@@ -250,6 +250,14 @@ async fn session_exists(
     Json(cores.sessions.token(&key).await.is_some())
 }
 
+/// The answer for a Core this App has no connection to. Nothing was sent.
+fn offline() -> ApiError {
+    ApiError::new(
+        ErrorCode::CoreOffline,
+        "This Core is not connected right now.",
+    )
+}
+
 fn unreachable(problem: impl std::fmt::Display) -> ApiError {
     ApiError::new(
         ErrorCode::NetworkError,
@@ -263,6 +271,9 @@ async fn end_session(tunnel: &Tunnel, token: &str) -> bool {
         Err(CallError::Transport(problem)) => {
             tracing::debug!(%problem, "could not end a Core session there");
             false
+        }
+        Err(CallError::Api { error, .. }) => {
+            error.error != ErrorCode::CoreOffline
         }
         _ => true,
     }
@@ -282,10 +293,17 @@ where
     request
         .headers_mut()
         .insert(HOST, HeaderValue::from_static(connect::tls::SERVER_NAME));
-    let (status, answer) = tunnel
-        .call(request.map(Full::new))
-        .await
-        .map_err(|problem| CallError::Transport(problem))?;
+    let (status, answer) =
+        tunnel
+            .call(request.map(Full::new))
+            .await
+            .map_err(|unanswered| match unanswered {
+                Unanswered::Offline => CallError::Api {
+                    status: 503,
+                    error: offline(),
+                },
+                Unanswered::Lost(problem) => CallError::Transport(problem),
+            })?;
     response::<E>(status.as_u16(), None, answer)
 }
 

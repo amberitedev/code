@@ -174,10 +174,7 @@ async fn pass_on(
         forward(&tunnel, n, upstream, request).await
     };
     sent.unwrap_or_else(|unanswered| match unanswered {
-        Unanswered::Offline => error(
-            ErrorCode::CoreOffline,
-            "This Core is not connected right now.",
-        ),
+        Unanswered::Offline => super::offline().into_response(),
         Unanswered::Lost(problem) => {
             tracing::debug!(%problem, "a Core did not answer");
             error(ErrorCode::NetworkError, "The Core did not answer.")

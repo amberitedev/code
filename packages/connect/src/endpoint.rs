@@ -16,6 +16,7 @@ use quinn::{
 };
 
 use crate::{
+    ip::is_public,
     socket::{Gate, Hold, Socket},
     stun,
     tls::{self, Identity, PeerId},
@@ -149,14 +150,13 @@ impl Endpoint {
         found
     }
 
-    /// A dialer at `candidates` was introduced: let those addresses in for a while, and send
-    /// toward them so the router in front of this endpoint lets their packets in.
-    pub fn expect(&self, candidates: &[SocketAddr]) {
+    /// The dialer `id` at `candidates` was introduced: let it in for a while, and send toward
+    /// those addresses so the router in front of this endpoint lets their packets in.
+    pub fn expect(&self, id: PeerId, candidates: &[SocketAddr]) {
         let candidates: Vec<SocketAddr> =
             candidates.iter().take(MAX_CANDIDATES).copied().collect();
-        for candidate in &candidates {
-            self.socket.admit(candidate.ip());
-        }
+        self.socket
+            .admit(id, candidates.iter().map(|candidate| candidate.ip()));
         let socket = Arc::clone(&self.socket);
         tokio::spawn(async move {
             let mut every = tokio::time::interval(PUNCH_EVERY);
@@ -234,7 +234,8 @@ impl Endpoint {
     }
 }
 
-/// Every address of this computer's networks that another computer could send to.
+/// Every address of this computer's networks that another computer could send to, public ones
+/// first: a global IPv6 address may be the only way in, and virtual adapters add many private ones.
 fn own_addresses(v6: bool) -> Vec<IpAddr> {
     let mut addresses = Vec::new();
     for interface in netdev::get_interfaces() {
@@ -260,6 +261,7 @@ fn own_addresses(v6: bool) -> Vec<IpAddr> {
             );
         }
     }
+    addresses.sort_by_key(|ip| !is_public(*ip));
     addresses
 }
 
@@ -285,10 +287,11 @@ impl Incoming {
         self.quinn.refuse();
     }
 
-    /// Finish the handshake. The dialer's address stays admitted for as long as the connection
-    /// is kept.
+    /// Finish the handshake, and keep the dialer only when it is who was introduced. Its
+    /// address stays admitted for as long as the connection is kept.
     pub async fn accept(self) -> io::Result<Connection> {
-        let hold = self.socket.hold(self.quinn.remote_address().ip());
+        let ip = self.quinn.remote_address().ip();
+        let hold = self.socket.hold(ip);
         let quinn = self.quinn.await?;
         let peer = quinn
             .peer_identity()
@@ -299,6 +302,10 @@ impl Incoming {
             .ok_or_else(|| {
                 io::Error::other("the dialer showed no certificate")
             })?;
+        if !self.socket.vouches(peer, ip) {
+            quinn.close(0u32.into(), b"not introduced");
+            return Err(io::Error::other("the dialer was not introduced"));
+        }
         Ok(Connection {
             quinn,
             peer,

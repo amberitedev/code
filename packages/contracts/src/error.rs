@@ -40,7 +40,8 @@ pub enum ErrorCode {
     CodeExpired,
     ConfigurationError,
     CoreRemoved,
-    /// The Core holds no link to the backend, so nobody can be introduced to it.
+    /// The Core cannot be reached: it holds no link to the backend, or the App has no
+    /// connection to it. Nothing was sent, so sending again once it is reached is safe.
     CoreOffline,
     DuplicateEmail,
     InvalidAddress,

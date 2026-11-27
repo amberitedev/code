@@ -12,7 +12,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{Extension, Router};
 use color_eyre::eyre::{Result, WrapErr};
-use connect::{Endpoint, Gate, Identity};
+use connect::{Endpoint, Gate, Identity, PeerId};
 use tokio::sync::Semaphore;
 use tracing::debug;
 
@@ -44,10 +44,14 @@ impl Connect {
         Ok(Self { endpoint, network })
     }
 
-    /// A device at `dialer` was introduced: let it in and send toward it, then say where this
-    /// Core might be reached, the port the router forwards first.
-    pub async fn introduce(&self, dialer: &[SocketAddr]) -> Vec<SocketAddr> {
-        self.endpoint.expect(dialer);
+    /// The device `id` at `dialer` was introduced: let it in and send toward it, then say where
+    /// this Core might be reached, the port the router forwards first.
+    pub async fn introduce(
+        &self,
+        id: PeerId,
+        dialer: &[SocketAddr],
+    ) -> Vec<SocketAddr> {
+        self.endpoint.expect(id, dialer);
         let forwarded: Vec<u16> =
             self.network.connect_port().into_iter().collect();
         self.endpoint.candidates(&forwarded).await

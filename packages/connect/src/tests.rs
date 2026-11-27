@@ -36,6 +36,7 @@ fn dialer() -> Endpoint {
 async fn only_an_introduced_dialer_reaches_a_listener() {
     let (core, address) = listener(Gate::Introduced);
     let app = dialer();
+    let neighbour = dialer();
 
     let core_id = core.id();
 
@@ -43,9 +44,10 @@ async fn only_an_introduced_dialer_reaches_a_listener() {
     let stranger = app.dial(core_id, &[address], API, NEVER).await;
     assert_eq!(stranger.err(), Some(NoPath));
 
-    core.expect(&app.candidates(&[]).await);
+    core.expect(app.id(), &app.candidates(&[]).await);
     let serving = tokio::spawn(async move {
-        // The stranger's abandoned attempt may still say goodbye, now that its address is let in.
+        // Only the introduced dialer is kept. The stranger's abandoned attempt may still say
+        // goodbye, now that its address is let in.
         let connection = loop {
             let incoming = core.accept().await.unwrap();
             if let Ok(connection) = incoming.accept().await {
@@ -59,6 +61,17 @@ async fn only_an_introduced_dialer_reaches_a_listener() {
         // Kept open: dropping a connection closes it before what was written has left.
         (connection, heard)
     });
+    // Another program at the same address, as behind the same carrier's router, is turned away
+    // once it shows its certificate.
+    let neighbouring = neighbour.dial(core_id, &[address], API, SOON).await;
+    let refused = match neighbouring {
+        Ok(connection) => tokio::time::timeout(SOON, connection.accept())
+            .await
+            .is_ok_and(|stream| stream.is_none()),
+        Err(NoPath) => true,
+    };
+    assert!(refused, "a dialer nobody introduced got in");
+
     let connection = app.dial(core_id, &[address], API, SOON).await.unwrap();
     let mut stream = connection.open().await.unwrap();
     stream.write_all(b"hello").await.unwrap();

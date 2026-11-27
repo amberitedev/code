@@ -148,6 +148,11 @@ test('the backend introduces the owner to a Core over its link, and writes nothi
 			headers: { upgrade: 'websocket', authorization: 'Bearer amc_other' },
 		})
 		assert.equal(stranger.status, 410)
+
+		// Removing the Core drops its link, so it learns at once.
+		const closed = new Promise((resolve) => link.webSocket.addEventListener('close', resolve))
+		assert.equal((await call('DELETE', '/cores/core', undefined, 'mra_owner')).status, 204)
+		await closed
 	})
 })
 

@@ -43,6 +43,8 @@ export class Cores {
 	private listed: ListedCore[] = []
 	/** Core id to where its requests go. See `route`. */
 	private routes = new Map<string, Route>()
+	/** Core id to its connection started by the last list, settled once it is made or failed. */
+	private routing = new Map<string, Promise<void>>()
 	/** Server id to the id of the Core that has it. */
 	private serverCores = new Map<string, string>()
 	/** Sign-ins in flight, by Core id, so requests that fail together sign in once. */
@@ -55,18 +57,21 @@ export class Cores {
 	constructor(private readonly client: AbstractModrinthClient) {}
 
 	/**
-	 * Fetch the account's Cores from the backend. A Core whose route cannot be worked out keeps its
-	 * plain address, so it does not take the other Cores down with it.
+	 * Fetch the account's Cores from the backend and start connecting to each. Requests to a Core
+	 * wait for its own connection only, so one that takes long holds up nobody else.
 	 */
 	public list(): Promise<ListedCore[]> {
-		const listing = this.client.backend.call(cores.ListCores).then(async (list) => {
-			const settled = await Promise.allSettled(list.map((core) => this.route(core)))
-			this.routes = new Map(
-				list.map((core, index) => {
-					const result = settled[index]
-					const plain = { base: core.address, reached: null }
-					return [core.id, result.status === 'fulfilled' ? result.value : plain]
-				}),
+		const listing = this.client.backend.call(cores.ListCores).then((list) => {
+			this.routing = new Map(
+				list.map((core) => [
+					core.id,
+					this.route(core).then(
+						(route) => {
+							this.routes.set(core.id, route)
+						},
+						() => undefined,
+					),
+				]),
 			)
 			this.listed = list
 			return list
@@ -105,6 +110,8 @@ export class Cores {
 			if (coreId === core.id) this.serverCores.delete(serverId)
 		}
 		this.routes.delete(core.id)
+		this.routing.delete(core.id)
+		this.unreached.delete(core.id)
 		this.listed = this.listed.filter((listed) => listed.id !== core.id)
 		this.cores = null
 		this.client.forgetCore(core.id)
@@ -203,8 +210,14 @@ export class Cores {
 			if (!fingerprint)
 				throw new ApiCallError(400, 'unsupported', 'This Core does not serve HTTPS yet')
 			const ticket = await this.ticket(core.id)
-			return this.sessions()
-				.signIn(core.id, fingerprint, ticket)
+			const signIn = () => this.sessions().signIn(core.id, fingerprint, ticket)
+			return signIn()
+				.catch(async (error: unknown) => {
+					// Nothing reached a Core the App had no connection to, so the ticket is unused.
+					const offline = isCoreCallError(error) && error.error === 'core_offline'
+					if (offline && (await this.reconnect(core.id))) return signIn()
+					throw error
+				})
 				.catch((error: unknown) => {
 					throw coreError(error)
 				})
@@ -241,7 +254,9 @@ export class Cores {
 
 	/** The base URL requests to a listed Core go to. */
 	public async url(coreId: string): Promise<string> {
-		return this.base(await this.core(coreId))
+		const core = await this.core(coreId)
+		await this.routing.get(core.id)
+		return this.routes.get(core.id)?.base ?? core.address
 	}
 
 	/**
@@ -336,10 +351,6 @@ export class Cores {
 		return this.cores ?? this.list()
 	}
 
-	private base(core: ListedCore): string {
-		return this.routes.get(core.id)?.base ?? core.address
-	}
-
 	/** Connect to a Core and answer where its requests go. Calls made together connect once. */
 	private route(core: CoreLocation): Promise<Route> {
 		const pending = this.connecting.get(core.id)
@@ -371,7 +382,8 @@ export class Cores {
 				route = await connect(core.id, core.address, core.cert_fingerprint, listener.candidates)
 		}
 		if (route.reached) this.unreached.delete(core.id)
-		else if (mayAsk) {
+		// Only the backend's part waits: dialing a Core on this network costs it nothing.
+		else if (route.dialer && mayAsk) {
 			const failures = (waiting?.failures ?? 0) + 1
 			const wait = Math.min(FIRST_INTRODUCE_WAIT_MS * 2 ** (failures - 1), MAX_INTRODUCE_WAIT_MS)
 			this.unreached.set(core.id, { failures, retryAt: Date.now() + wait })

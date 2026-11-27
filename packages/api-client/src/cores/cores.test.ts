@@ -69,7 +69,7 @@ class FakeClient extends GenericModrinthClient {
 			connectCore: async (_coreId, _address, _fingerprint, introduced) => {
 				this.connects.push(introduced)
 				const base = 'http://127.0.0.1:5000/secret/core/0'
-				if (this.home) return { base, reached: 'local', dialer: null }
+				if (this.home) return { base, reached: this.off ? null : 'local', dialer: null }
 				if (introduced && !this.off) return { base, reached: 'internet', dialer: null }
 				return { base, reached: null, dialer: introduced ? null : DIALER }
 			},
@@ -100,14 +100,24 @@ class FakeClient extends GenericModrinthClient {
 describe('connecting to a Core', () => {
 	it('leaves the backend out when the Core answers on this network', async () => {
 		const client = new FakeClient(true)
-		await client.cores.list()
+		await client.cores.url(CORE.id)
 		expect(client.introductions).toBe(0)
 		expect(client.connects).toEqual([undefined])
 	})
 
+	it('dials a Core on this network again at once, since that costs the backend nothing', async () => {
+		const client = new FakeClient(true)
+		client.off = true
+		await client.cores.url(CORE.id)
+		expect(await client.cores.reconnect(CORE.id)).toBe(false)
+		client.off = false
+		expect(await client.cores.reconnect(CORE.id)).toBe(true)
+		expect(client.introductions).toBe(0)
+	})
+
 	it('has the backend introduce this device to a Core on another network', async () => {
 		const client = new FakeClient(false)
-		await client.cores.list()
+		await client.cores.url(CORE.id)
 		expect(client.introductions).toBe(1)
 		expect(client.connects).toEqual([undefined, INTRODUCED])
 		expect(await client.cores.reconnect(CORE.id)).toBe(true)
@@ -118,12 +128,13 @@ describe('connecting to a Core', () => {
 		try {
 			const client = new FakeClient(false)
 			client.off = true
-			await client.cores.list()
+			await client.cores.url(CORE.id)
 			expect(client.introductions).toBe(1)
 
 			// Requests keep failing meanwhile; none of them asks the backend.
 			expect(await client.cores.reconnect(CORE.id)).toBe(false)
 			await client.cores.list()
+			await client.cores.url(CORE.id)
 			expect(client.introductions).toBe(1)
 
 			await vi.advanceTimersByTimeAsync(15_000)

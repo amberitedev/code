@@ -21,7 +21,7 @@ const CANDIDATE = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\]):\d{1,5}$/i
  */
 export class CoreLink extends DurableObject<Env> {
 	/** Introductions the Core has not answered yet. Lost with the object, and so are their callers. */
-	private waiting = new Map<string, (answer: Listener) => void>()
+	private waiting = new Map<string, (answer: Listener | null) => void>()
 
 	/** The Core connects. An older socket of the same Core is one it lost, and goes. */
 	fetch(): Response {
@@ -44,14 +44,16 @@ export class CoreLink extends DurableObject<Env> {
 		})
 		try {
 			// A socket the Core replaced may still be closing; sending on it throws.
+			let sent = 0
 			for (const socket of sockets) {
 				try {
 					socket.send(JSON.stringify(introduction))
+					sent++
 				} catch {
 					continue
 				}
 			}
-			return await answered
+			return sent ? await answered : null
 		} finally {
 			clearTimeout(giveUp)
 			this.waiting.delete(request)
@@ -69,8 +71,27 @@ export class CoreLink extends DurableObject<Env> {
 		this.waiting.get(answer.request)?.({ candidates: answer.candidates })
 	}
 
+	/** The Core was removed from its account: drop its link, so it learns at once. */
+	unlink(): void {
+		for (const socket of this.ctx.getWebSockets()) socket.close(1000, 'Removed')
+	}
+
 	webSocketClose(socket: WebSocket): void {
 		socket.close()
+		this.gone(socket)
+	}
+
+	webSocketError(socket: WebSocket): void {
+		this.gone(socket)
+	}
+
+	/** Nobody is left to answer once the Core's last socket is gone. */
+	private gone(lost: WebSocket): void {
+		const open = this.ctx
+			.getWebSockets()
+			.some((socket) => socket !== lost && socket.readyState === WebSocket.OPEN)
+		if (open) return
+		for (const answer of this.waiting.values()) answer(null)
 	}
 }
 

@@ -184,7 +184,7 @@ pub async fn run(sync: Arc<Sync>) {
                 info!("connected to the backend");
                 tokio::select! {
                     lost = sync.serve_owed(&key, &addresses) => lost,
-                    never = link::hold(&sync, &key) => match never {},
+                    () = link::hold(&sync, &key) => Lost::Removed,
                 }
             }
             Err(lost) => lost,

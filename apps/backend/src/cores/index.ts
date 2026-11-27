@@ -433,6 +433,7 @@ async function removeCore(request: Request, env: Env, id: string) {
 		.bind(id, user.id)
 		.run()
 	if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
+	await env.CORE_LINK.getByName(id).unlink()
 	const shares = (
 		await env.DB.prepare(
 			'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',

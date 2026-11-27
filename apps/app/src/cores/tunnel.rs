@@ -2,7 +2,7 @@
 //! holding the certificate the App learned at pairing, with a stream per HTTP connection.
 
 use std::{
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -78,9 +78,9 @@ pub struct Tunnel {
     dialers: Arc<Dialers>,
     /// The last connection made. One that closed stays, for where the Core was.
     connection: Mutex<Option<Arc<Connection>>>,
-    /// Held while dialing the Core again, so requests that fail together dial once. Holds when
-    /// the Core last did not answer.
-    redialing: tokio::sync::Mutex<Option<Instant>>,
+    /// Held while dialing the Core on this computer or its network, so requests that fail
+    /// together dial once. Holds when it last did not answer there.
+    dialing_here: tokio::sync::Mutex<Option<Instant>>,
 }
 
 impl Tunnel {
@@ -90,7 +90,7 @@ impl Tunnel {
             core,
             dialers,
             connection: Mutex::default(),
-            redialing: tokio::sync::Mutex::default(),
+            dialing_here: tokio::sync::Mutex::default(),
         }
     }
 
@@ -114,8 +114,12 @@ impl Tunnel {
         candidates: &[SocketAddr],
         within: Duration,
     ) -> bool {
-        // Loopback candidates come alone: only a Core on this computer has one.
-        let loopback = candidates.iter().all(|to| to.ip().is_loopback());
+        // Loopback candidates come alone: only a Core on this computer has one. The loopback
+        // endpoint is IPv4; the other also takes IPv6.
+        let loopback = !candidates.is_empty()
+            && candidates.iter().all(
+                |to| matches!(to.ip(), IpAddr::V4(ip) if ip.is_loopback()),
+            );
         let Ok(endpoint) = self.dialers.toward(loopback).await else {
             return false;
         };
@@ -129,6 +133,25 @@ impl Tunnel {
         }
     }
 
+    /// Connect to the Core at `address` on this computer or its network, unless it did not
+    /// answer there within the last [`REDIAL_REST`]. Calls made together dial once.
+    pub async fn dial_here(
+        &self,
+        address: SocketAddr,
+        within: Duration,
+    ) -> bool {
+        let mut unanswered = self.dialing_here.lock().await;
+        if self.reached().is_some() {
+            return true;
+        }
+        if unanswered.is_some_and(|at| at.elapsed() < REDIAL_REST) {
+            return false;
+        }
+        let answered = self.dial(&[address], within).await;
+        *unanswered = (!answered).then(Instant::now);
+        answered
+    }
+
     /// A new stream to the Core. When the connection is gone, a Core on this computer or its
     /// network is dialed again where it was, since it lets everyone there in. Any other needs a
     /// new introduction, which is the frontend's to ask for.
@@ -137,23 +160,10 @@ impl Tunnel {
         if let Ok(stream) = held.open().await {
             return Some(stream);
         }
-        let mut unanswered = self.redialing.lock().await;
-        let now = self.connection()?;
-        if !Arc::ptr_eq(&held, &now)
-            && let Ok(stream) = now.open().await
-        {
-            return Some(stream);
-        }
         let was = held.remote();
-        let rested = unanswered.is_none_or(|at| at.elapsed() > REDIAL_REST);
-        if !is_private(was.ip()) || !rested {
+        if !is_private(was.ip()) || !self.dial_here(was, REDIAL_TIMEOUT).await {
             return None;
         }
-        if !self.dial(&[was], REDIAL_TIMEOUT).await {
-            *unanswered = Some(Instant::now());
-            return None;
-        }
-        *unanswered = None;
         self.connection()?.open().await.ok()
     }
 
@@ -181,28 +191,22 @@ impl Tunnel {
     pub async fn call(
         &self,
         request: Request<Full<Bytes>>,
-    ) -> Result<(StatusCode, Bytes), String> {
+    ) -> Result<(StatusCode, Bytes), Unanswered> {
+        let lost = |error: hyper::Error| Unanswered::Lost(error.to_string());
         let call = async {
-            let mut sender =
-                self.open().await.map_err(|unanswered| match unanswered {
-                    Unanswered::Offline => "not connected".to_owned(),
-                    Unanswered::Lost(problem) => problem,
-                })?;
-            let response = sender
-                .send_request(request)
-                .await
-                .map_err(|error| error.to_string())?;
+            let mut sender = self.open().await?;
+            let response = sender.send_request(request).await.map_err(lost)?;
             let status = response.status();
             let body = response
                 .into_body()
                 .collect()
                 .await
-                .map_err(|error| error.to_string())?
+                .map_err(lost)?
                 .to_bytes();
             Ok((status, body))
         };
         tokio::time::timeout(CALL_TIMEOUT, call)
             .await
-            .map_err(|_| "no answer in time".to_string())?
+            .map_err(|_| Unanswered::Lost("no answer in time".into()))?
     }
 }

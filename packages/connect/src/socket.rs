@@ -18,7 +18,7 @@ use quinn::{
 };
 use tokio::sync::oneshot;
 
-use crate::{ip::is_private, stun};
+use crate::{ip::is_private, stun, tls::PeerId};
 
 /// How long an introduced address may take to connect.
 const ADMITTED_FOR: Duration = Duration::from_secs(60);
@@ -35,7 +35,9 @@ const DROPS_PER_POLL: usize = 32;
 #[derive(Default)]
 struct Admitted {
     peers: HashMap<IpAddr, Admission>,
-    /// This computer and its own networks get in with no introduction.
+    /// The dialers the backend introduced, until when they may connect.
+    ids: HashMap<PeerId, Instant>,
+    /// Private addresses get in with no introduction.
     local: bool,
 }
 
@@ -87,8 +89,8 @@ impl Drop for Hold {
 pub enum Gate {
     /// Only introduced addresses get in.
     Introduced,
-    /// This computer and its own networks get in too, so a Core is reached at home with the
-    /// internet down.
+    /// Private addresses (this computer and networks like it) get in too, so a Core is reached
+    /// at home with the internet down.
     IntroducedOrLocal,
 }
 
@@ -111,8 +113,8 @@ impl Socket {
             v6,
             admitted: gate.map(|gate| {
                 Mutex::new(Admitted {
-                    peers: HashMap::new(),
                     local: matches!(gate, Gate::IntroducedOrLocal),
+                    ..Admitted::default()
                 })
             }),
             asked: Mutex::default(),
@@ -127,24 +129,40 @@ impl Socket {
         self.v6
     }
 
-    /// Let `ip` in for [`ADMITTED_FOR`].
-    pub fn admit(&self, ip: IpAddr) {
+    /// Let the dialer `id` in from `ips` for [`ADMITTED_FOR`].
+    pub fn admit(&self, id: PeerId, ips: impl IntoIterator<Item = IpAddr>) {
         let Some(admitted) = &self.admitted else {
             return;
         };
         let mut admitted = admitted.lock().expect("not poisoned");
         let now = Instant::now();
+        let until = now + ADMITTED_FOR;
         admitted
             .peers
             .retain(|_, admission| admission.held > 0 || admission.until > now);
-        admitted
-            .peers
-            .entry(ip.to_canonical())
-            .or_insert(Admission {
-                until: now,
-                held: 0,
-            })
-            .until = now + ADMITTED_FOR;
+        admitted.ids.retain(|_, until| *until > now);
+        admitted.ids.insert(id, until);
+        for ip in ips {
+            admitted
+                .peers
+                .entry(ip.to_canonical())
+                .or_insert(Admission { until, held: 0 })
+                .until = until;
+        }
+    }
+
+    /// Whether the dialer `id`, at `ip`, may connect: it was introduced, or the gate lets `ip`
+    /// in with no introduction. Anyone else at an introduced address, as behind the same
+    /// carrier's router, is not.
+    pub fn vouches(&self, id: PeerId, ip: IpAddr) -> bool {
+        self.admitted.as_ref().is_none_or(|admitted| {
+            let admitted = admitted.lock().expect("not poisoned");
+            (admitted.local && is_private(ip.to_canonical()))
+                || admitted
+                    .ids
+                    .get(&id)
+                    .is_some_and(|until| *until > Instant::now())
+        })
     }
 
     /// Keep `ip` admitted until the hold drops.
@@ -176,30 +194,33 @@ impl Socket {
     /// The address a STUN server sees this socket's packets come from: the router's, with the
     /// port it gave this socket. `None` when the server does not answer in time.
     pub async fn reflexive(&self, server: &str) -> Option<SocketAddr> {
+        tokio::time::timeout(STUN_TIMEOUT, self.ask(server))
+            .await
+            .ok()
+            .flatten()
+    }
+
+    async fn ask(&self, server: &str) -> Option<SocketAddr> {
         let server = tokio::net::lookup_host(server)
             .await
             .ok()?
             .find(SocketAddr::is_ipv4)?;
         let id = stun::transaction();
-        let (answer, answered) = oneshot::channel();
+        let (answer, mut answered) = oneshot::channel();
         self.asked.lock().expect("not poisoned").insert(id, answer);
-        let asking = async {
-            // UDP: ask again while there is no answer.
-            let mut again = tokio::time::interval(STUN_TIMEOUT / 3);
-            let mut answered = answered;
-            loop {
-                tokio::select! {
-                    _ = again.tick() => self.send(server, &stun::request(&id)),
-                    address = &mut answered => return address.ok(),
-                }
-            }
+        // Also when the caller stops waiting, as for the server that lost the race.
+        let _forget = Forget {
+            asked: &self.asked,
+            id,
         };
-        let address = tokio::time::timeout(STUN_TIMEOUT, asking)
-            .await
-            .ok()
-            .flatten();
-        self.asked.lock().expect("not poisoned").remove(&id);
-        address
+        // UDP: ask again while there is no answer.
+        let mut again = tokio::time::interval(STUN_TIMEOUT / 3);
+        loop {
+            tokio::select! {
+                _ = again.tick() => self.send(server, &stun::request(&id)),
+                address = &mut answered => return address.ok(),
+            }
+        }
     }
 
     /// One packet outside QUIC. Lost when the socket is busy; every caller sends again.
@@ -238,6 +259,17 @@ impl Socket {
             let _ = answer.send(address);
         }
         false
+    }
+}
+
+struct Forget<'a> {
+    asked: &'a Mutex<HashMap<stun::Transaction, oneshot::Sender<SocketAddr>>>,
+    id: stun::Transaction,
+}
+
+impl Drop for Forget<'_> {
+    fn drop(&mut self) {
+        self.asked.lock().expect("not poisoned").remove(&self.id);
     }
 }
 
