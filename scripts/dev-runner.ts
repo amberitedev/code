@@ -9,12 +9,16 @@ import * as NodePath from 'node:path'
 import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
-import { recordTiming } from './timings.ts'
+import {
+	type CargoTimings,
+	recordTiming,
+	summarizeCargoTimings,
+	takeCargoTimings,
+} from './timings.ts'
 
 const BASE_PORTS = {
 	app: 1420,
 	backend: 8787,
-	accountWeb: 3100,
 	core: 16662,
 } as const
 const MAX_HASH_OFFSET = 3000
@@ -28,19 +32,25 @@ const RESTART_FIRST_WAIT_MS = 750
 const ANSWERED_REQUESTS = 50
 /** The stack a checkout starts with before any fixture names one. */
 const DEFAULT_FIXTURE = 'default'
+const NOT_RUNNING = 'No stack is running. Start one with: vp run dev [fixture]'
+const RUNNER_FLAGS = ['--hide-windows', '--held']
+/** Set, to the runner's PID, on the fixture a runner applies as its first start. */
+const FIRST_APPLY = 'DEV_RUNNER_FIRST_APPLY'
 const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 // Stays under the ten minute limit agent shells put on a foreground command.
-const UP_WAIT_MS = 9 * 60_000
+const READY_WAIT_MS = 9 * 60_000
 // One cached program per distinct set of Rust inputs. Older ones are deleted.
 const CACHED_PROGRAMS = 6
-const BUILD_LOCK_STALE_MS = 60 * 60_000
-const BUILD_LOCK = 'building'
-// In the shared build output: each repo crate's content when last compiled, and for which programs.
-const BUILT_CRATES = 'built-crates.json'
-// In the shared build output's record: a crate's output as the programs compile it.
-const PROGRAMS = 'programs'
-// Given to an unchanged crate's files so Cargo trusts its compiled output.
-const TRUSTED_FILE_TIME = new Date('2000-01-01T00:00:00Z')
+// In a checkout's build output: the latest test runs that passed, by everything that went into them.
+const PASSED_TESTS = 'passed-tests.json'
+const PASSED_TEST_RUNS = 200
+// In a checkout's build output: rewritten as each Cargo run starts, and one `<name>.<pid>.<id>`
+// file per Cargo run in progress. Another checkout copies the output only while neither changes.
+const CARGO_STARTED = 'cargo-started'
+const CARGO_RUNNING = 'cargo-running'
+// What a new build output takes from another: third-party crates, compiled the same anywhere.
+const SEEDED_FOLDERS = ['deps', 'build', '.fingerprint']
+const SEED_COPIES = 64
 const FETCH_BAD_PORTS = new Set([
 	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
 	103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465,
@@ -49,11 +59,9 @@ const FETCH_BAD_PORTS = new Set([
 	6669, 6679, 6697, 10080,
 ])
 
-const RUNNER_FLAGS = ['--no-account-web', '--hide-windows', '--held', '--background']
 export type DevPorts = {
 	readonly app: number
 	readonly backend: number
-	readonly accountWeb: number
 	/** The first Core's port. Any further Core takes a free one when it starts. */
 	readonly core: number
 }
@@ -84,8 +92,8 @@ export type StackShape = {
 	readonly id: string
 }
 type RunnerInput = {
-	/** The account sign-in website. Only a person signing in by hand needs it. */
-	readonly accountWeb: boolean
+	/** Applied as the stack starts. Without one it starts on the checkout's data. */
+	readonly fixture: string | undefined
 	/** Start only what holds no data, and leave the backend, Cores and Apps to a fixture. */
 	readonly held: boolean
 	/** Apps run without a window on the desktop and are used from browser tabs. */
@@ -97,10 +105,10 @@ type RunnerInput = {
  * something already built starts without Cargo, and a running program never blocks a build.
  */
 export type ProgramBuild = {
-	/** Programs built by every checkout, shared. Its lock lets one build run at a time. */
+	/** Programs built by every checkout, shared. */
 	readonly cacheDir: string
 	readonly cargoArgs: ReadonlyArray<string>
-	/** The checkout to build. Cargo runs from a link to it, taking its toolchain and settings. */
+	/** The checkout to build, where Cargo runs. */
 	readonly cwd: string
 	/** Settings the build reads. They change the program, so they are part of its key. */
 	readonly env: Record<string, string>
@@ -110,17 +118,11 @@ export type ProgramBuild = {
 	readonly inputs: ReadonlyArray<string>
 	/** The files Cargo writes in `<targetDir>/debug`. */
 	readonly programs: ReadonlyArray<string>
+	/** This checkout's own build output. */
 	readonly targetDir: string
 }
 /** `cargo test` of some crates, compiled into the programs' build output the way they are. */
-export type TestBuild = Omit<ProgramBuild, 'programs'> & {
-	/** What the programs build reads. A crate in it that is not tested is compiled as they compile it. */
-	readonly shared: ReadonlyArray<string>
-	/** The tested crates that are a program's own crate, by folder, with that program's inputs. */
-	readonly programInputs: Readonly<Record<string, ReadonlyArray<string>>>
-	/** The tested crates' folders, sorted, as `inputs` names them. */
-	readonly tested: ReadonlyArray<string>
-}
+export type TestBuild = Omit<ProgramBuild, 'programs'>
 export type ProcessSpec = {
 	readonly args: ReadonlyArray<string>
 	/** Set when the process is a Rust program: the build and its file. Otherwise the arguments go to `vp`. */
@@ -129,7 +131,7 @@ export type ProcessSpec = {
 	readonly env: NodeJS.ProcessEnv
 	readonly label: string
 }
-/** Where a dev App serves its local API. Picked once per runner, so `rs` keeps it. */
+/** Where a dev App serves its local API. See [`appLocalAddresses`]. */
 export type LocalAddress = {
 	readonly port: number
 	readonly secret: string
@@ -151,12 +153,15 @@ export type RuntimeFile = {
 	pid?: number
 	readonly branch: string
 	readonly dataDir: string
-	/** False when the account sign-in website was left out, so nothing waits for its port. */
-	readonly accountWeb: boolean
-	/** A process whose Rust build failed. `up` stops waiting when it sees one. */
+	/** A process whose Rust build failed. A fixture stops waiting when it sees one. */
 	buildFailed?: string
-	/** Whether the Apps were started without a window. `up --show-windows` cannot change it later. */
-	readonly hideWindows: boolean
+	/**
+	 * Set until the runner has built the programs and started its first stack's programs, or
+	 * applied its first fixture. Until then nothing else changes the stack's data.
+	 */
+	starting?: boolean
+	/** When the runner's process was created, as the OS reports it: a reused PID is not this runner. */
+	readonly started?: string
 	readonly ports: DevPorts
 	/** Every program by label, such as `backend`, `core:1` and `app:2`. */
 	programs: Record<string, ProgramState>
@@ -192,6 +197,9 @@ export class DevRunnerError extends Error {
 	}
 }
 
+/** The stack is still starting when a wait gives up: slow, such as a cold build, not failed. */
+class StillStarting extends DevRunnerError {}
+
 export function isBrowserAllowedPort(port: number): boolean {
 	return !FETCH_BAD_PORTS.has(port)
 }
@@ -200,7 +208,6 @@ export function portsForOffset(offset: number): DevPorts {
 	return {
 		app: BASE_PORTS.app + offset,
 		backend: BASE_PORTS.backend + offset,
-		accountWeb: BASE_PORTS.accountWeb + offset,
 		core: BASE_PORTS.core + offset,
 	}
 }
@@ -241,11 +248,10 @@ export function resolveStartOffset(input: {
 }
 
 export async function findFirstAvailableOffset(input: {
-	readonly accountWeb?: boolean
 	readonly checkPort?: PortAvailabilityCheck
 	readonly startOffset: number
 }): Promise<number> {
-	const requiredPorts = requiredPortNames(input.accountWeb)
+	const requiredPorts = ['app', 'backend', 'core'] as const
 	const checkPort = input.checkPort ?? portIsAvailable
 
 	for (let offset = input.startOffset; offset <= MAX_PORT; offset += 1) {
@@ -271,7 +277,6 @@ export function createRuntimeEnvironment(input: {
 	delete env.PORT
 	env.ACCOUNT_API_URL = `http://127.0.0.1:${input.ports.backend}`
 	env.VITE_ACCOUNT_API_URL = env.ACCOUNT_API_URL
-	env.ACCOUNT_WEB_URL = `http://127.0.0.1:${input.ports.accountWeb}`
 	return env
 }
 
@@ -301,12 +306,61 @@ async function pickFreePorts(count: number): Promise<ReadonlyArray<number>> {
 	return servers.map(({ port }) => port)
 }
 
-/** A free loopback port and a new secret for each App. */
-async function pickLocalAddresses(count: number): Promise<ReadonlyArray<LocalAddress>> {
-	return (await pickFreePorts(count)).map((port) => ({
-		port,
-		secret: NodeCrypto.randomBytes(32).toString('hex'),
+/**
+ * Each App's local address, kept in `.data/local-api.json` by the App's name, which its tab URL
+ * carries, so the URL stays the same across restarts and fixtures. A kept port that is taken or
+ * unusable is replaced, and so is an unusable secret.
+ */
+export async function appLocalAddresses(
+	data: string,
+	names: ReadonlyArray<string>,
+): Promise<ReadonlyArray<LocalAddress>> {
+	const file = NodePath.join(data, 'local-api.json')
+	let kept: Record<string, unknown> = {}
+	try {
+		const value: unknown = JSON.parse(NodeFS.readFileSync(file, 'utf8'))
+		if (isRecord(value)) kept = value
+	} catch {
+		// None kept yet.
+	}
+	const keptFor = (name: string) => {
+		const entry = kept[name]
+		if (!isRecord(entry)) return {}
+		const { port, secret } = entry
+		return {
+			port:
+				typeof port === 'number' &&
+				Number.isInteger(port) &&
+				port > 0 &&
+				port <= MAX_PORT &&
+				isBrowserAllowedPort(port)
+					? port
+					: undefined,
+			secret: typeof secret === 'string' && /^[0-9a-f]{64}$/.test(secret) ? secret : undefined,
+		}
+	}
+	const ports = await Promise.all(
+		names.map(async (name, index) => {
+			const { port } = keptFor(name)
+			// Two Apps kept with one port: the later one gets a new port.
+			const twice = names.slice(0, index).some((other) => keptFor(other).port === port)
+			return port !== undefined && !twice && (await canListen(port, '127.0.0.1')) ? port : undefined
+		}),
+	)
+	const missing = ports.filter((port) => port === undefined).length
+	const taken = new Set(Object.keys(kept).map((name) => keptFor(name).port))
+	const fresh =
+		missing === 0
+			? []
+			: (await pickFreePorts(missing + taken.size)).filter((port) => !taken.has(port))
+	const addresses = names.map((name, index) => ({
+		port: ports[index] ?? fresh.pop()!,
+		secret: keptFor(name).secret ?? NodeCrypto.randomBytes(32).toString('hex'),
 	}))
+	NodeFS.mkdirSync(data, { recursive: true })
+	const updated = { ...kept, ...Object.fromEntries(names.map((name, i) => [name, addresses[i]])) }
+	NodeFS.writeFileSync(file, JSON.stringify(updated), { mode: 0o600 })
+	return addresses
 }
 
 /**
@@ -317,12 +371,6 @@ export function appTabUrl(name: string, vitePort: number, address: LocalAddress)
 	const url = new URL(`http://${name.replaceAll('_', '-')}.localhost:${vitePort}`)
 	url.hash = `local=${encodeURIComponent(`http://127.0.0.1:${address.port}/${address.secret}`)}`
 	return url.href
-}
-
-/** The programs every stack runs. Its Cores and Apps come on top of these. */
-export function sharedLabels(accountWeb = true): ReadonlyArray<string> {
-	const labels = ['backend', 'account-web', 'app-frontend']
-	return accountWeb ? labels : labels.filter((label) => label !== 'account-web')
 }
 
 /** The stack file, or `undefined` before any fixture was applied. */
@@ -347,60 +395,53 @@ export function readStackShape(path: string): StackShape | undefined {
 }
 
 async function main(): Promise<void> {
-	if (process.argv.includes('--background')) runInBackground()
 	const paths = resolveWorktreePaths()
 	const [command, ...commandArgs] = process.argv.slice(2)
-	if (command === 'up' || command === 'fixture') {
-		const args = commandArgs.filter((arg) => arg !== '--show-windows')
-		const background = {
-			// Apps sign themselves in and are used from browser tabs.
-			accountWeb: false,
-			hideWindows: !commandArgs.includes('--show-windows'),
-		}
-		if (command === 'fixture') {
-			if (args.length > 1) throw new DevRunnerError('fixture takes one name or file.')
-			return applyFixture(paths, args[0] ?? DEFAULT_FIXTURE, {
-				...parseInput([]),
-				...background,
-			})
-		}
-		const input = { ...parseInput(args), ...background }
-		// A checkout that never had a fixture applied has no data to start on.
-		if (!NodeFS.existsSync(paths.stack) && !readLiveRuntime(paths)) {
-			return applyFixture(paths, DEFAULT_FIXTURE, input)
-		}
-		return up(paths, input)
+	if (command === 'fixture') {
+		if (commandArgs.length > 1) throw new DevRunnerError('fixture takes one name or file.')
+		return applyFixture(paths, commandArgs[0] ?? DEFAULT_FIXTURE)
 	}
 	if (command === 'down') return down(paths)
 	if (command === 'status') {
+		if (commandArgs.some((arg) => arg !== '--wait')) {
+			throw new DevRunnerError('status takes only --wait.')
+		}
+		if (commandArgs.includes('--wait')) await waitUntilReady(paths)
 		if (!(await printStatus(paths))) process.exitCode = 1
 		return
 	}
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
-	if (command === 'build') return buildPrograms(paths, commandArgs.includes('--artifact'))
+	if (command === 'build') return buildPrograms(paths, commandArgs)
 	if (command === 'test') return testCrates(paths, commandArgs)
+	if (command === 'gen-ts') return generateTypeScript(paths, commandArgs)
 	if (command !== 'dev') {
 		throw new DevRunnerError(
-			`Unknown command ${command ?? ''}. Expected fixture, up, dev, status, stop, rs, down, build or test.`,
+			`Unknown command ${command ?? ''}. Expected dev, fixture, status, stop, rs, down, build, test or gen-ts.`,
 		)
 	}
 	const input = parseInput(commandArgs)
+	const live = readRunner(paths)
+	if (live) {
+		throw new DevRunnerError(
+			`Already running as PID ${live.pid}. Apply a fixture to it with vp run fixture <name>, or stop it with vp run down.`,
+		)
+	}
+	logToFile(paths)
+	// No apply outlives its runner, so a turn still held is a leftover.
+	NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 	const { offset: startOffset, source } = resolveStartOffset({
 		devInstance: process.env.DEV_INSTANCE,
 		explicitOffset: process.env.PORT_OFFSET,
 		primaryPath: paths.primary,
 		worktreePath: paths.worktree,
 	})
-	const selectedOffset = await findFirstAvailableOffset({
-		accountWeb: input.accountWeb,
-		startOffset,
-	})
+	const selectedOffset = await findFirstAvailableOffset({ startOffset })
 	const ports = portsForOffset(selectedOffset)
 	const branch = currentBranch(paths.worktree)
 	const env = createRuntimeEnvironment({ baseEnv: readSharedEnv(paths), ports })
 	const saved = readStackShape(paths.stack)
-	// A stack with no data yet starts held, and the default fixture then fills it.
-	const applyDefault = !input.held && !saved
+	// A checkout with no data yet gets the default fixture. The stack waits for the fixture.
+	const fixture = input.held ? undefined : (input.fixture ?? (saved ? undefined : DEFAULT_FIXTURE))
 	const secretPath = NodePath.join(paths.data, 'backend', 'dev-secret')
 	NodeFS.mkdirSync(NodePath.dirname(secretPath), { recursive: true })
 	if (!NodeFS.existsSync(secretPath))
@@ -408,17 +449,17 @@ async function main(): Promise<void> {
 	env.LOCAL_DEV_SECRET = NodeFS.readFileSync(secretPath, 'utf8').trim()
 	prepareLocalBackend(paths, env)
 	// A fixture brings the backend's database with it.
-	const started = input.held ? undefined : saved
+	const started = input.held || fixture ? undefined : saved
 	if (started) migrateLocalBackend(paths, env)
-	const shared = createSharedSpecs({ accountWeb: input.accountWeb, env, paths, ports })
+	const shared = createSharedSpecs({ env, paths, ports })
 	printPlan({ branch, paths, ports, shape: started, source, specs: shared })
 
 	const runtime: RuntimeFile = {
 		pid: process.pid,
+		started: processStarted(process.pid),
+		starting: true,
 		branch,
 		dataDir: paths.data,
-		accountWeb: input.accountWeb,
-		hideWindows: input.hideWindows,
 		ports,
 		programs: {},
 		requests: {},
@@ -427,21 +468,24 @@ async function main(): Promise<void> {
 		source,
 		urls: {
 			backend: `http://127.0.0.1:${ports.backend}`,
-			accountWeb: `http://127.0.0.1:${ports.accountWeb}`,
 			app: `http://localhost:${ports.app}`,
 		},
 	}
-	writeRuntimeFile(paths, runtime)
-	const setBuildFailed = (label: string, failed: boolean) => {
-		if ((runtime.buildFailed === label) === failed) return
-		runtime.buildFailed = failed ? label : undefined
-		writeRuntimeFile(paths, runtime)
+	/** Once stopping, only `stop` writes the file, so nothing left queued records a live stack. */
+	const save = () => {
+		if (!stopping) writeRuntimeFile(paths, runtime)
+	}
+	/** Both programs come from one build, so its latest result stands for either. */
+	const setBuildFailed = (label: string | undefined) => {
+		if (runtime.buildFailed === label) return
+		runtime.buildFailed = label
+		save()
 	}
 	const setState = (label: string, state: ProgramState | undefined) => {
 		if (runtime.programs[label] === state) return
 		if (state) runtime.programs[label] = state
 		else delete runtime.programs[label]
-		writeRuntimeFile(paths, runtime)
+		save()
 	}
 	const specsByLabel = new Map(shared.map((spec) => [spec.label, spec]))
 	for (const spec of shared) runtime.programs[spec.label] = 'stopped'
@@ -469,12 +513,13 @@ async function main(): Promise<void> {
 	}
 	/** `ready`, when given, is awaited after the build and before the program runs: false skips it. */
 	const start = async (spec: ProcessSpec, ready?: Promise<boolean>) => {
+		if (stopping) return
 		const token = Symbol(spec.label)
 		starts.set(spec.label, token)
 		setState(spec.label, 'starting')
 		let program: string | undefined
 		if (spec.program) {
-			setBuildFailed(spec.label, false)
+			setBuildFailed(undefined)
 			const built = await ensureProgram(
 				paths.worktree,
 				spec,
@@ -485,7 +530,7 @@ async function main(): Promise<void> {
 			if (stopping || starts.get(spec.label) !== token) return
 			program = built && NodePath.join(built, spec.program.file)
 			if (!program) {
-				setBuildFailed(spec.label, true)
+				setBuildFailed(spec.label)
 				setState(spec.label, 'failed')
 				runnerLog('error', `${spec.label} did not build. Use rs ${spec.label} after fixing it.`)
 				return
@@ -540,6 +585,7 @@ async function main(): Promise<void> {
 	/** Resolves once the old process is gone, with `started` for when the new one is up or has failed. */
 	const restart = async (label: string) => {
 		const spec = specsByLabel.get(label)
+		if (stopping) return undefined
 		if (!spec) {
 			runnerLog(
 				'warning',
@@ -548,6 +594,7 @@ async function main(): Promise<void> {
 			return undefined
 		}
 		await stopProgram(label)
+		if (stopping) return undefined
 		restartFailures.delete(label)
 		runnerLog('info', `Starting ${label}...`)
 		// Not waited for: a Rust program may build first, and the next command should not queue behind it.
@@ -595,18 +642,24 @@ async function main(): Promise<void> {
 			(label) => label === 'backend' || isStackLabel(label),
 		)
 		await Promise.all(labels.map(stopProgram))
+		setBuildFailed(undefined)
 		runnerLog('info', 'Backend, Cores and Apps stopped for a fixture.')
 	}
 	/** Starts the Apps and Cores `shape` names, replacing the ones that ran before. */
 	const startStack = async (shape: StackShape) => {
 		await halt()
+		if (stopping) return
 		for (const label of [...specsByLabel.keys()].filter(isStackLabel)) {
 			specsByLabel.delete(label)
 			setState(label, undefined)
 		}
-		const appAddresses = await pickLocalAddresses(shape.apps.length)
+		const appAddresses = await appLocalAddresses(
+			paths.data,
+			shape.apps.map(({ name }) => name),
+		)
 		const corePorts =
 			shape.cores === 0 ? [] : [ports.core, ...(await pickFreePorts(shape.cores - 1))]
+		if (stopping) return
 		const stack = createStackSpecs({
 			appAddresses,
 			branch,
@@ -637,9 +690,10 @@ async function main(): Promise<void> {
 		for (const { dataDir } of [...runtime.apps, ...runtime.cores]) {
 			NodeFS.mkdirSync(dataDir, { recursive: true })
 		}
-		writeRuntimeFile(paths, runtime)
+		save()
 		const backend = specsByLabel.get('backend')
 		if (backend) await startProgram(backend)
+		if (stopping) return
 		// An App signs in once as it starts and a Core asks for its pairing code as it starts, so the
 		// backend has to answer before either runs; their build goes on meanwhile. Not waited for
 		// here: commands run one at a time, and `rs backend` is how a backend that will not start
@@ -675,7 +729,7 @@ async function main(): Promise<void> {
 			const kept = Object.entries(runtime.requests).slice(1 - ANSWERED_REQUESTS)
 			const state = runtime.programs[labelFor(name)] ?? 'unknown'
 			runtime.requests = Object.fromEntries([...kept, [request, state]])
-			writeRuntimeFile(paths, runtime)
+			save()
 		},
 		commandFile: NodePath.join(paths.data, 'dev-commands'),
 		getCore: () => processes.get('core:1'),
@@ -696,17 +750,82 @@ async function main(): Promise<void> {
 			runnerLog('info', `${label} stopped. Use rs ${label} to start it again.`)
 		},
 	})
+	// Only now: the command input empties the command file, which would erase a command sent sooner.
+	writeRuntimeFile(paths, runtime)
 
 	process.once('SIGINT', () => void stop(130))
 	process.once('SIGTERM', () => void stop(143))
+	process.once('SIGHUP', () => void stop(129))
+
+	const begun = performance.now()
+	/** Stops the stack, saying why it can never become ready. */
+	const fail = (reason: string) => {
+		if (stopping) return
+		runnerLog('error', reason)
+		void stop(1)
+	}
+	/** Prints where to reach the stack once it is ready. A fixture prints it when it is applied. */
+	const announceReady = async () => {
+		let shown: string | undefined
+		for (;;) {
+			if (stopping) return
+			const failed =
+				runtime.buildFailed ??
+				Object.keys(runtime.programs).find((label) => runtime.programs[label] === 'failed')
+			if (failed) return fail(`${failed} did not start, so the stack cannot become ready.`)
+			try {
+				if (await runtimeIsReady(runtime)) break
+			} catch (error) {
+				if (!(error instanceof PageError)) throw error
+				// The frontend picks up a fix by itself.
+				if (error.message !== shown) runnerLog('error', (shown = error.message))
+			}
+			await new Promise((resolve) => setTimeout(resolve, 500))
+		}
+		recordTiming(paths.primary, {
+			kind: 'dev',
+			worktree: paths.worktree,
+			result: 'ok',
+			ms: { total: Math.round(performance.now() - begun) },
+		})
+		await printStatus(paths)
+	}
+	/** The first start is done: readiness is asked of what runs now, and others may change it. */
+	const startDone = () => {
+		runtime.starting = undefined
+		save()
+	}
 
 	try {
 		for (const spec of shared) if (spec.label !== 'backend') void startProgram(spec)
-		if (started) {
+		// A fixture waits nine minutes for a program, which a cold build outlasts, so build first.
+		const built = await ensureProgram(
+			paths.worktree,
+			{ env, label: 'build' },
+			programsBuild(paths, env),
+			builds,
+			() => stopping,
+		)
+		if (stopping) {
+			// Stopped during the build: start nothing.
+		} else if (!built) {
+			fail('The App and Core did not build. Fix the error above and start dev again.')
+		} else if (started) {
 			void startStack(started)
+				.then(() => {
+					startDone()
+					return announceReady()
+				})
+				.catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)))
 		} else {
 			runnerLog('info', 'Backend, Cores and Apps wait for a fixture.')
-			if (applyDefault) applyDefaultFixture(paths, builds)
+			if (!fixture) startDone()
+			else if ((await applyFirstFixture(paths, fixture, builds)) !== 0) {
+				fail(`The ${fixture} fixture did not apply, so the stack cannot become ready.`)
+			} else if (!stopping) {
+				startDone()
+				await printStatus(paths)
+			}
 		}
 		await finished
 	} finally {
@@ -715,36 +834,65 @@ async function main(): Promise<void> {
 }
 
 /**
- * Fills a checkout that has no data yet. The runner in the foreground does this for itself; a
- * background `up` applies the fixture from its own process instead.
+ * Applies the runner's first fixture as `vp run fixture` would, in a child the runner stops when
+ * it stops. Resolves with its exit code.
  */
-function applyDefaultFixture(
+function applyFirstFixture(
 	paths: WorktreePaths,
+	fixture: string,
 	children: Set<NodeChildProcess.ChildProcess>,
-): void {
+): Promise<number> {
 	const child = NodeChildProcess.spawn(
 		process.execPath,
-		[NodeURL.fileURLToPath(import.meta.url), 'fixture', DEFAULT_FIXTURE],
-		{ cwd: paths.worktree, stdio: 'inherit', windowsHide: true },
+		[NodeURL.fileURLToPath(import.meta.url), 'fixture', fixture],
+		{
+			cwd: paths.worktree,
+			env: { ...process.env, [FIRST_APPLY]: String(process.pid) },
+			stdio: ['ignore', 'pipe', 'pipe'],
+			windowsHide: true,
+		},
 	)
+	// Through this process's own output, so the dev log has it too.
+	child.stdout.on('data', (chunk: Buffer) => process.stdout.write(chunk))
+	child.stderr.on('data', (chunk: Buffer) => process.stderr.write(chunk))
 	children.add(child)
-	child.once('close', () => children.delete(child))
+	return new Promise((resolve) => {
+		child.once('error', () => resolve(1))
+		child.once('close', (code) => {
+			children.delete(child)
+			resolve(code ?? 1)
+		})
+	})
 }
 
+/** `dev [fixture] [--hide-windows]`, plus `--held` for a command that seeds the stack itself. */
 export function parseInput(args: ReadonlyArray<string>): RunnerInput {
 	const unknown = args.find((arg) => arg.startsWith('--') && !RUNNER_FLAGS.includes(arg))
 	if (unknown) throw new DevRunnerError(`Unknown option ${unknown}.`)
-	const extra = args.find((arg) => !arg.startsWith('--'))
-	if (extra) {
-		throw new DevRunnerError(
-			`Unexpected ${extra}. A fixture names the Apps and Cores: vp run fixture <name>`,
-		)
-	}
+	const fixtures = args.filter((arg) => !arg.startsWith('--'))
+	if (fixtures.length > 1) throw new DevRunnerError('dev takes one fixture name or file.')
+	const held = args.includes('--held')
+	if (held && fixtures.length > 0) throw new DevRunnerError('A held stack takes no fixture.')
+	return { fixture: fixtures[0], held, hideWindows: args.includes('--hide-windows') }
+}
 
-	return {
-		accountWeb: !args.includes('--no-account-web'),
-		held: args.includes('--held'),
-		hideWindows: args.includes('--hide-windows'),
+/** Copies everything the runner and its programs print to `.data/dev.log`, for other commands to point at. */
+function logToFile(paths: WorktreePaths): void {
+	NodeFS.mkdirSync(paths.data, { recursive: true })
+	let log: number | undefined = NodeFS.openSync(devLogPath(paths), 'w')
+	for (const stream of [process.stdout, process.stderr]) {
+		const write = stream.write
+		stream.write = function (this: NodeJS.WriteStream, chunk: string | Uint8Array) {
+			// A throw here would end the runner before it stops its programs, so the copy is dropped.
+			try {
+				if (log !== undefined) {
+					NodeFS.writeSync(log, typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+				}
+			} catch {
+				log = undefined
+			}
+			return Reflect.apply(write, this, arguments)
+		} as typeof stream.write
 	}
 }
 
@@ -784,11 +932,22 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 }
 
 /**
- * `build`: compiles the App and Core for this checkout's current Rust without starting anything,
- * so a later `up` finds them ready. Worktree setup runs it in the background. `--artifact` builds
- * nothing and prints the name CI keeps this build's programs under.
+ * `build [--test <crate>]...`: compiles the App and Core for this checkout's current Rust without
+ * starting anything, so a later `dev` finds them ready. `dev` runs it before it starts the Cores and Apps.
+ * With `--test`, the crates are tested after it, failed or not. `--artifact` alone builds nothing
+ * and prints the name CI keeps this build's programs under.
  */
-async function buildPrograms(paths: WorktreePaths, nameOnly: boolean): Promise<void> {
+async function buildPrograms(paths: WorktreePaths, args: ReadonlyArray<string>): Promise<void> {
+	if (args.length === 1 && args[0] === '--artifact') return buildProgramsOnce(paths, true)
+	const tests = args.filter((_, index) => index % 2 === 1)
+	if (args.some((arg, index) => index % 2 === 0 && arg !== '--test') || args.length % 2 === 1) {
+		throw new DevRunnerError('build takes only `--test <crate>` pairs.')
+	}
+	await buildProgramsOnce(paths)
+	if (tests.length > 0) await testCrates(paths, tests)
+}
+
+async function buildProgramsOnce(paths: WorktreePaths, nameOnly = false): Promise<void> {
 	const ports = portsForOffset(0)
 	const specs = createStackSpecs({
 		// Only the builds are used, so no App ever gets this address.
@@ -811,10 +970,7 @@ async function buildPrograms(paths: WorktreePaths, nameOnly: boolean): Promise<v
 	}
 }
 
-/**
- * `test <crate>...`: one `cargo test` of the crates in the shared build output, one build at a
- * time like the programs, so a checkout that runs tests never fills its own `target`.
- */
+/** `test <crate>...`: one `cargo test` of the crates in this checkout's build output. */
 async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): Promise<void> {
 	const known = new Set([...localCrates(paths.worktree).values()].map((crate) => crate.name))
 	const unknown = crates.filter((crate) => !known.has(crate))
@@ -828,21 +984,35 @@ async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): 
 	if (!(await runTests(paths, env, crates, build))) process.exitCode = 1
 }
 
+/**
+ * `gen-ts [--check]`: writes the TypeScript the Rust crates generate, by running only their
+ * `ts_is_up_to_date` tests, so it does not wait on the rest passing. Later crates import the
+ * earlier ones' files, hence the order. `--check` only compares.
+ */
+async function generateTypeScript(
+	paths: WorktreePaths,
+	args: ReadonlyArray<string>,
+): Promise<void> {
+	if (args.some((arg) => arg !== '--check')) throw new DevRunnerError('gen-ts takes only --check.')
+	const check = args.includes('--check')
+	const { WRITE_TS: _, ...shell } = process.env
+	const env = { ...shell, SQLX_OFFLINE: 'true', ...(check ? {} : { WRITE_TS: '1' }) }
+	for (const crate of ['contracts', 'engine', 'amberite-app']) {
+		const build = testBuild(paths, readSharedEnv(paths), [crate])
+		if (!(await runTests(paths, env, [crate], build, ['ts_is_up_to_date']))) {
+			process.exitCode = 1
+			if (!check) return
+		}
+	}
+}
+
 export function testBuild(
 	paths: WorktreePaths,
 	env: NodeJS.ProcessEnv,
 	crates: ReadonlyArray<string>,
 ): TestBuild {
-	const checkout = NodeFS.realpathSync.native(paths.worktree)
 	const tested = [...localCrates(paths.worktree).values()].filter((crate) =>
 		crates.includes(crate.name),
-	)
-	const folder = (crate: LocalCrate) =>
-		NodePath.relative(checkout, crate.folder).replaceAll('\\', '/')
-	const programs = tested.flatMap((crate) =>
-		crate.name === 'copal' || crate.name === 'amberite-app'
-			? [[folder(crate), programInputs(paths, crate.name)] as const]
-			: [],
 	)
 	const { cargoArgs: _, programs: __, ...shared } = programsBuild(paths, env)
 	const targets = tested.flatMap((crate) => crate.testTargets)
@@ -858,12 +1028,15 @@ export function testBuild(
 			...crates.flatMap((crate) => (PROGRAM_PACKAGES.includes(crate) ? [] : ['--package', crate])),
 			'--no-default-features',
 			...tested.flatMap((crate) =>
-				crate.hasDefault && crate.name !== 'amberite-app'
+				crate.features.includes('default') && crate.name !== 'amberite-app'
 					? ['--features', `${crate.name}/default`]
 					: [],
 			),
-			// The App's tests check its generated TypeScript, as in CI.
-			...(crates.includes('amberite-app') ? ['--features', 'amberite-app/export-ts'] : []),
+			// Their tests check their generated TypeScript, as in CI, where the App's feature turns
+			// it on for every crate. Only the tested crates take it, so the rest stay as compiled.
+			...tested.flatMap((crate) =>
+				crate.features.includes('export-ts') ? ['--features', `${crate.name}/export-ts`] : [],
+			),
 			// Cargo takes `--lib` once, for every selected package.
 			...(targets.includes('--lib') ? ['--lib'] : []),
 			...targets.filter((target) => target !== '--lib'),
@@ -871,67 +1044,90 @@ export function testBuild(
 		inputs: [
 			...new Set([
 				...crates.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })),
-				...programs.flatMap(([, inputs]) => inputs),
+				...crates.flatMap((crate) =>
+					crate === 'copal' || crate === 'amberite-app' ? programInputs(paths, crate) : [],
+				),
 			]),
 		],
-		programInputs: Object.fromEntries(programs),
-		shared: shared.inputs,
-		tested: tested.map(folder).sort(),
 	}
 }
 
-/** Whether the crates' tests compiled and passed. */
+/** Whether the crates' tests compiled and passed. `filter` names the tests to run, all when empty. */
 async function runTests(
 	paths: WorktreePaths,
 	env: NodeJS.ProcessEnv,
 	crates: ReadonlyArray<string>,
 	build: TestBuild,
+	filter: ReadonlyArray<string> = [],
 ): Promise<boolean> {
 	const spec = { env, label: `test ${crates.join(' ')}` }
 	const started = performance.now()
-	const unlock = await lockBuilds(build.cacheDir, spec.label, () => false)
-	if (!unlock) return false
-	const lockWait = performance.now() - started
+	const key = programKey(paths.worktree, build)
+	// The tests see this environment too, so a pass counts for it alone.
+	const passKey = (programs: string) =>
+		NodeCrypto.createHash('sha256')
+			.update(programs)
+			.update(JSON.stringify(Object.entries(env).sort(([a], [b]) => (a < b ? -1 : 1))))
+			.digest('hex')
+			.slice(0, 20)
+	const passedFile = NodePath.join(build.targetDir, PASSED_TESTS)
+	const passed = (): ReadonlyArray<string> => {
+		try {
+			const record: unknown = JSON.parse(NodeFS.readFileSync(passedFile, 'utf8'))
+			return Array.isArray(record) ? record.filter((key) => typeof key === 'string') : []
+		} catch {
+			return []
+		}
+	}
+	// A filtered run passes for its tests alone, so it neither counts as a pass nor takes one.
+	if (filter.length === 0 && passed().includes(passKey(key))) {
+		runnerLog('info', `${spec.label} passed already with these inputs (${passKey(key)})`)
+		recordTiming(paths.primary, {
+			kind: 'test',
+			worktree: paths.worktree,
+			crates,
+			result: 'ok',
+			passedBefore: true,
+			ms: { total: Math.round(performance.now() - started) },
+		})
+		return true
+	}
 	let compiled: number | undefined
-	let changedCrates = 0
+	let timings: CargoTimings | undefined
 	let result: 'ok' | 'failed' = 'failed'
 	try {
-		let key = programKey(paths.worktree, build)
-		for (;;) {
-			const run = await compileShared(
-				paths.worktree,
-				spec,
-				build,
-				new Set(),
-				[...build.cargoArgs, '--no-run'],
-				key,
-			)
-			changedCrates += run.changed
-			if (!run.compiled) return false
-			if (run.key === key) break
-			key = run.key
-		}
+		const built = await runCargo(spec, build, new Set(), [
+			...build.cargoArgs,
+			'--no-run',
+			'--timings',
+		])
+		timings = takeCargoTimings(build.targetDir)
+		if (!built) return false
 		compiled = performance.now()
-		// Still locked: another checkout's build would replace these test programs.
-		if (await runCargo(spec, build, new Set(), build.cargoArgs)) result = 'ok'
-		// Cargo compiles what was edited since `--no-run` again, which the record does not describe.
-		if (programKey(paths.worktree, build) !== key) {
-			NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
+		const run = filter.length > 0 ? [...build.cargoArgs, '--', ...filter] : build.cargoArgs
+		if (await runCargo(spec, build, new Set(), run)) result = 'ok'
+		// An input edited during the run may not be what was tested.
+		if (result === 'ok' && filter.length === 0 && programKey(paths.worktree, build) === key) {
+			try {
+				writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
+			} catch (error) {
+				runnerLog(
+					'warning',
+					`${spec.label} passed, but the pass was not recorded: ${String(error)}`,
+				)
+			}
 		}
 		return result === 'ok'
 	} finally {
-		unlock()
 		const finished = performance.now()
 		recordTiming(paths.primary, {
 			kind: 'test',
 			worktree: paths.worktree,
 			crates,
 			result,
-			// Crates in the repo compiled again; third-party crates are not counted.
-			changedCrates,
+			...compiledDetails(paths.worktree, timings ? [timings] : []),
 			ms: {
-				lockWait: Math.round(lockWait),
-				compile: Math.round((compiled ?? finished) - started - lockWait),
+				compile: Math.round((compiled ?? finished) - started),
 				...(compiled === undefined ? {} : { test: Math.round(finished - compiled) }),
 				total: Math.round(finished - started),
 			},
@@ -939,17 +1135,14 @@ async function runTests(
 	}
 }
 
-/** The programs every stack runs: the ones that are not a Core or an App. */
+/** The programs every stack runs beside its Cores and Apps. */
 export function createSharedSpecs(input: {
-	readonly accountWeb: boolean
 	readonly env: NodeJS.ProcessEnv
 	readonly paths: WorktreePaths
 	readonly ports: DevPorts
 }): ReadonlyArray<ProcessSpec> {
-	const labels = sharedLabels(input.accountWeb)
-	const backendUrl = `http://127.0.0.1:${input.ports.backend}`
-	const specs: Record<string, ProcessSpec> = {
-		backend: {
+	return [
+		{
 			args: [
 				'exec',
 				'wrangler',
@@ -970,34 +1163,13 @@ export function createSharedSpecs(input: {
 			env: input.env,
 			label: 'backend',
 		},
-		'account-web': {
-			args: [
-				'exec',
-				'nuxi',
-				'dev',
-				'--host',
-				'127.0.0.1',
-				'--port',
-				String(input.ports.accountWeb),
-			],
-			cwd: NodePath.join(input.paths.worktree, 'apps', 'frontend'),
-			// The website is upstream Modrinth; these are its own settings for which API to call.
-			env: {
-				...input.env,
-				BASE_URL: `${backendUrl}/v2/`,
-				BROWSER_BASE_URL: `${backendUrl}/v2/`,
-				PORT: String(input.ports.accountWeb),
-			},
-			label: 'account-web',
-		},
-		'app-frontend': {
+		{
 			args: ['dev', '--port', String(input.ports.app), '--strictPort'],
 			cwd: NodePath.join(input.paths.worktree, 'apps', 'app-frontend'),
 			env: input.env,
 			label: 'app-frontend',
 		},
-	}
-	return labels.map((label) => specs[label]!)
+	]
 }
 
 /** One program per Core and per App of `shape`, the Cores first. */
@@ -1088,7 +1260,6 @@ function programsBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBui
 			),
 		},
 		ignoredInputs: engine.ignoredInputs,
-		// The App's first: loose inputs count toward the first crate.
 		inputs: [
 			...new Set([...programInputs(paths, 'amberite-app'), ...programInputs(paths, 'copal')]),
 		],
@@ -1167,9 +1338,9 @@ type LocalCrate = {
 	readonly dependencies: ReadonlyArray<string>
 	/** Folders of the local crates only its tests, examples and benchmarks build with. */
 	readonly devDependencies: ReadonlyArray<string>
+	/** The features it declares. */
+	readonly features: ReadonlyArray<string>
 	readonly folder: string
-	/** Whether it declares a `default` feature. */
-	readonly hasDefault: boolean
 	readonly name: string
 	/** Cargo target flags that select its tests: its library, programs and integration tests. */
 	readonly testTargets: ReadonlyArray<string>
@@ -1204,8 +1375,8 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 			crates.set(folder, {
 				dependencies: local(false),
 				devDependencies: local(true),
+				features: Object.keys(crate.features),
 				folder,
-				hasDefault: 'default' in crate.features,
 				name: crate.name,
 				testTargets: crate.targets.flatMap((target) =>
 					target.kind.includes('lib')
@@ -1224,13 +1395,15 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 }
 
 /**
- * Every checkout compiles into one build output, like a pnpm store: each dependency is compiled
- * once and kept once. Builds already run one at a time. Only the runner compiles there, so
- * `BUILT_CRATES` describes everything in it; a person's own Cargo runs use `target` as usual.
+ * Each checkout compiles into its own `target/dev`, so builds never wait on each other or replace
+ * each other's output; `seedBuildOutput` starts it with another checkout's third-party crates.
+ * Finished programs go to one folder every checkout shares.
  */
 function workspaceBuildDirs(paths: WorktreePaths): Pick<ProgramBuild, 'cacheDir' | 'targetDir'> {
-	const targetDir = NodePath.join(paths.primary, 'target', 'dev-shared')
-	return { cacheDir: NodePath.join(targetDir, 'dev-bin'), targetDir }
+	return {
+		cacheDir: NodePath.join(paths.primary, 'target', 'dev-bin'),
+		targetDir: NodePath.join(paths.worktree, 'target', 'dev'),
+	}
 }
 
 function programFile(name: string): string {
@@ -1329,8 +1502,8 @@ async function buildProgram(
 	const complete = (key: string) =>
 		build.programs.every((program) => NodeFS.existsSync(NodePath.join(cached(key), program)))
 	let key = initialKey
-	// The shared build output is <primary>/target/dev-shared.
-	const primary = NodePath.resolve(build.targetDir, '..', '..')
+	// The shared program folder is <primary>/target/dev-bin.
+	const primary = NodePath.resolve(cache, '..', '..')
 	const asked = performance.now()
 	if (complete(key)) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
@@ -1343,43 +1516,29 @@ async function buildProgram(
 			program: build.programs.join(' '),
 			key,
 			result: 'ok',
-			changedCrates: 0,
 			ms: { download, total: download },
 		})
 	} else {
 		const started = performance.now()
 		// Looking for a download that was not there, before compiling.
 		const lookup = started - asked
-		// A stop that ended a download must not go on to compile.
-		if (stopped()) return undefined
-		const unlock = await lockBuilds(cache, spec.label, stopped)
-		if (!unlock) return undefined
-		const lockWait = performance.now() - started
-		let changedCrates = 0
+		const timings: CargoTimings[] = []
 		let result: 'ok' | 'failed' = 'failed'
 		try {
-			// Another runner may have built it while this one waited.
 			while (!complete(key)) {
+				if (stopped()) return undefined
 				runnerLog('info', `${spec.label} building ${build.programs.join(', ')} (${key})`)
-				const run = await compileShared(worktree, spec, build, builds, build.cargoArgs, key)
-				changedCrates += run.changed
-				if (!run.compiled) return undefined
-				// A download may have put them there meanwhile, and Windows will not replace a
-				// program that is running.
-				if (run.key === key && !complete(key)) {
-					NodeFS.mkdirSync(cached(key), { recursive: true })
-					for (const program of build.programs) {
-						const target = NodePath.join(cached(key), program)
-						const partial = `${target}.${process.pid}.partial`
-						NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', program), partial)
-						NodeFS.renameSync(partial, target)
-					}
-				}
-				key = run.key
+				const built = await runCargo(spec, build, builds, [...build.cargoArgs, '--timings'])
+				const report = takeCargoTimings(build.targetDir)
+				if (report) timings.push(report)
+				if (!built) return undefined
+				const builtKey = programKey(worktree, build)
+				// An input edited during the run makes the output a mix, so it compiles again.
+				if (builtKey === key) saveProgram(build, cached(key))
+				key = builtKey
 			}
 			result = 'ok'
 		} finally {
-			unlock()
 			const total = performance.now() - started
 			recordTiming(primary, {
 				kind: 'build',
@@ -1387,26 +1546,30 @@ async function buildProgram(
 				program: build.programs.join(' '),
 				key,
 				result,
-				// Crates in the repo compiled again; third-party crates are not counted.
-				changedCrates,
-				ms: {
-					lookup: Math.round(lookup),
-					lockWait: Math.round(lockWait),
-					compile: Math.round(total - lockWait),
-					total: Math.round(lookup + total),
-				},
+				...compiledDetails(worktree, timings),
+				ms: { lookup: Math.round(lookup), total: Math.round(lookup + total) },
 			})
 		}
 	}
 	const used = new Date()
-	NodeFS.utimesSync(cached(key), used, used)
+	try {
+		NodeFS.utimesSync(cached(key), used, used)
+	} catch {
+		// Pruned by another checkout this instant: starting fails, and the next start builds it again.
+	}
+	// Other checkouts prune this folder too.
 	const keys = NodeFS.readdirSync(cache)
-		.filter((entry) => entry !== BUILD_LOCK)
-		.map((entry) => NodePath.join(cache, entry))
-		.sort((left, right) => NodeFS.statSync(right).mtimeMs - NodeFS.statSync(left).mtimeMs)
-	for (const old of keys.slice(CACHED_PROGRAMS)) {
+		.flatMap((entry) => {
+			try {
+				return [{ entry, at: NodeFS.statSync(NodePath.join(cache, entry)).mtimeMs }]
+			} catch {
+				return []
+			}
+		})
+		.sort((left, right) => right.at - left.at)
+	for (const { entry } of keys.slice(CACHED_PROGRAMS).filter(({ entry }) => entry !== key)) {
 		try {
-			NodeFS.rmSync(old, { recursive: true })
+			NodeFS.rmSync(NodePath.join(cache, entry), { recursive: true })
 		} catch {
 			// Still running in another checkout.
 		}
@@ -1570,138 +1733,31 @@ async function downloadPrograms(
 	}
 }
 
-/**
- * One Cargo run into the shared build output, with the checkout's crates dated for it first and
- * recorded once it succeeds. An input edited during the run makes the output a mix, and Cargo may
- * have compiled crates the record calls unchanged, so the record is forgotten and the returned key
- * differs from `key`: the caller compiles again.
- */
-async function compileShared(
-	worktree: string,
-	spec: Pick<ProcessSpec, 'env' | 'label'>,
-	build: ProgramBuild | TestBuild,
-	builds: Set<NodeChildProcess.ChildProcess>,
-	args: ReadonlyArray<string>,
-	key: string,
-): Promise<{ readonly changed: number; readonly compiled: boolean; readonly key: string }> {
-	const prepared = prepareCheckoutCrates(worktree, build)
-	const compiled = await runCargo(spec, build, builds, args)
-	const builtKey = programKey(worktree, build)
-	if (builtKey !== key) {
-		NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
-	} else if (compiled) prepared.recordBuilt()
-	return { changed: prepared.changed, compiled, key: builtKey }
-}
-
-type BuiltCrate = {
-	readonly hash: string
-	/**
-	 * The builds whose output of it is from this content: `programs` for the crate as the programs
-	 * compile it, which every test run that does not test it compiles too, and `test <folder>...`
-	 * for its own tests. Named `programs` because checkouts on older branches share this record.
-	 */
-	readonly programs: ReadonlyArray<string>
+/** What a build or test run's timing line says about what compiled, from Cargo's `--timings`. */
+function compiledDetails(worktree: string, timings: ReadonlyArray<CargoTimings>) {
+	const names = new Set([...localCrates(worktree).values()].map((crate) => crate.name))
+	return { branch: currentBranch(worktree), ...summarizeCargoTimings(timings, names) }
 }
 
 /**
- * Cargo decides whether a crate needs compiling from file times alone, and every checkout shares
- * one build output. So before a build, each crate in the repo is checked against the content it
- * was last compiled from as this build compiles it: as the programs do, or as one crate's tests. A
- * crate that matches gets old file times, folders included, so Cargo keeps its compiled output even
- * though this checkout's files are newer. A crate that differs, or was last compiled for other
- * builds only, gets the current time, so Cargo compiles it again from this checkout. Returns how
- * many crates will compile, and what to record once the build succeeds.
+ * Copies the built programs into `folder`. Another checkout with the same inputs may have saved
+ * them first and be running them, and Windows cannot replace a running program, so a program
+ * already there is kept.
  */
-export function prepareCheckoutCrates(
-	worktree: string,
-	build: ProgramBuild | TestBuild,
-): { readonly changed: number; readonly recordBuilt: () => void } {
-	const recordFile = NodePath.join(build.targetDir, BUILT_CRATES)
-	let record: Record<string, BuiltCrate> = {}
-	try {
-		record = JSON.parse(NodeFS.readFileSync(recordFile, 'utf8'))
-	} catch {
-		// First build into this folder: every crate compiles.
-	}
-	// Test runs compile the crates they do not test exactly as the programs do.
-	const buildName = (folder: string) =>
-		'tested' in build && (build.tested.includes(folder) || !build.shared.includes(folder))
-			? `test ${build.tested.join(' ')}`
-			: PROGRAMS
-	const folders = build.inputs.filter((input) =>
-		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
-	)
-	const files = new Map<string, Array<[string, string]>>(folders.map((folder) => [folder, []]))
-	// Inputs outside every crate folder, such as the App's version in `package.json`, count toward
-	// the program's own crate (the first input folder), in its tests too, so the two keep trusting
-	// each other's output.
-	const own = 'tested' in build ? build.programInputs : { [folders[0] ?? '']: build.inputs }
-	const loose: Array<[string, string]> = []
-	for (const [file, blob] of inputContents(worktree, build)) {
-		const folder = folders
-			.filter((candidate) => file.startsWith(`${candidate}/`))
-			.sort((left, right) => right.length - left.length)[0]
-		if (folder) files.get(folder)!.push([file, blob])
-		else loose.push([file, blob])
-	}
-	const hashes = new Map<string, string>()
-	const now = new Date()
-	let changed = 0
-	for (const [folder, entries] of files) {
-		const hash = NodeCrypto.createHash('sha256')
-		const inputs = own[folder] ?? []
-		const hashed = [
-			...entries,
-			...loose.filter(([file]) =>
-				inputs.some((input) => file === input || file.startsWith(`${input}/`)),
-			),
-		]
-		for (const [file, blob] of hashed.sort(([left], [right]) => (left < right ? -1 : 1))) {
-			hash.update(file).update('\0').update(blob).update('\0')
-		}
-		const digest = hash.digest('hex')
-		hashes.set(folder, digest)
-		const built = record[folder]
-		const trusted = built?.hash === digest && built.programs.includes(buildName(folder))
-		if (!trusted) {
-			changed += 1
-			// Compiling from other content may replace what other builds use, whether or not this
-			// build succeeds.
-			if (built?.hash !== digest) delete record[folder]
-		}
-		const time = trusted ? TRUSTED_FILE_TIME : now
-		// Cargo also compares folder times for a build script's `rerun-if-changed` folders, and a new
-		// checkout's folders are new.
-		const dated = new Set(entries.map(([file]) => file))
-		if (trusted) {
-			for (const [file] of entries) {
-				for (let parent = NodePath.posix.dirname(file); parent.startsWith(folder);) {
-					if (dated.has(parent)) break
-					dated.add(parent)
-					parent = NodePath.posix.dirname(parent)
-				}
-			}
-		}
-		for (const file of dated) {
-			try {
-				NodeFS.utimesSync(NodePath.join(worktree, file), time, time)
-			} catch {
-				// Deleted since it was listed.
-			}
+function saveProgram(build: ProgramBuild, folder: string): void {
+	NodeFS.mkdirSync(folder, { recursive: true })
+	for (const program of build.programs) {
+		const target = NodePath.join(folder, program)
+		if (NodeFS.existsSync(target)) continue
+		const partial = `${target}.${process.pid}.partial`
+		NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', program), partial)
+		try {
+			NodeFS.renameSync(partial, target)
+		} catch (error) {
+			NodeFS.rmSync(partial, { force: true })
+			if (!NodeFS.existsSync(target)) throw error
 		}
 	}
-	writeRecord(recordFile, record)
-	const recordBuilt = () => {
-		for (const [folder, hash] of hashes) {
-			const built = record[folder]?.hash === hash ? record[folder] : undefined
-			record[folder] = {
-				hash,
-				programs: [...new Set([...(built?.programs ?? []), buildName(folder)])],
-			}
-		}
-		writeRecord(recordFile, record)
-	}
-	return { changed, recordBuilt }
 }
 
 /** Written whole, then renamed into place, so a stopped runner never leaves half a record. */
@@ -1719,34 +1775,34 @@ async function runCargo(
 	builds: Set<NodeChildProcess.ChildProcess>,
 	args: ReadonlyArray<string>,
 ): Promise<boolean> {
-	const debug = NodePath.join(build.targetDir, 'debug')
-	// Cargo keeps each program in both folders, and either one can be the file moved aside below.
-	for (const folder of [debug, NodePath.join(debug, 'deps')]) {
-		for (const entry of NodeFS.existsSync(folder) ? NodeFS.readdirSync(folder) : []) {
-			if (!entry.endsWith('.old')) continue
-			try {
-				NodeFS.rmSync(NodePath.join(folder, entry))
-			} catch {
-				// Still running.
-			}
-		}
+	if (!NodeFS.existsSync(NodePath.join(build.targetDir, 'debug'))) {
+		const ours = new Set([...localCrates(build.cwd).values()].map((crate) => crate.name))
+		await seedBuildOutput(build.cwd, build.targetDir, ours, spec.label)
 	}
-	const checkout = linkCheckout(build.targetDir, build.cwd)
-	// Compiler messages name the checkout itself, never the link another build will move.
-	const toCheckout = (line: string) =>
-		line.replaceAll(checkout, build.cwd).replaceAll(checkout.replaceAll('\\', '/'), build.cwd)
-	for (let retried = false; ; retried = true) {
-		// On Unix, Cargo finds the manifest from the physical working directory, not the link.
-		const [command, ...rest] = args
-		const manifest = ['--manifest-path', NodePath.join(checkout, 'Cargo.toml')]
-		const child = NodeChildProcess.spawn('cargo', [command!, ...manifest, ...rest], {
-			cwd: checkout,
+	NodeFS.mkdirSync(build.targetDir, { recursive: true })
+	cargoRunning(build.targetDir)
+	// The marker first: a copy that read the old `CARGO_STARTED` then sees the new one.
+	const running = NodePath.join(
+		build.targetDir,
+		`${CARGO_RUNNING}.${process.pid}.${NodeCrypto.randomUUID()}`,
+	)
+	NodeFS.writeFileSync(running, '')
+	try {
+		NodeFS.writeFileSync(NodePath.join(build.targetDir, CARGO_STARTED), NodeCrypto.randomUUID())
+		const child = NodeChildProcess.spawn('cargo', args, {
+			cwd: build.cwd,
 			detached: process.platform !== 'win32',
 			env: cargoEnv({ ...spec.env, ...build.env, CARGO_TARGET_DIR: build.targetDir }),
 			stdio: ['ignore', 'pipe', 'pipe'],
 			windowsHide: true,
 		})
 		builds.add(child)
+		try {
+			// Cargo can outlive this process when it is killed, and keeps writing.
+			NodeFS.writeFileSync(running, String(child.pid ?? ''))
+		} catch {
+			// The marker still names this process, which waits for Cargo below.
+		}
 		// Compiles started by any checkout run behind whatever the person is doing. Windows gives
 		// the compiler processes Cargo starts the same priority.
 		try {
@@ -1754,12 +1810,8 @@ async function runCargo(
 		} catch {
 			// Already finished.
 		}
-		const failure: string[] = []
-		const rememberFailure = (line: string) => {
-			if (/Access is denied|failed to remove file/.test(line)) failure.push(line)
-		}
-		pipeOutput(child.stdout, spec.label, process.stdout, undefined, toCheckout)
-		pipeOutput(child.stderr, spec.label, process.stderr, rememberFailure, toCheckout)
+		pipeOutput(child.stdout, spec.label, process.stdout)
+		pipeOutput(child.stderr, spec.label, process.stderr)
 		const code = await new Promise<number>((resolve) => {
 			child.once('error', (error) => {
 				runnerLog('error', `Could not start cargo: ${error.message}`)
@@ -1768,86 +1820,177 @@ async function runCargo(
 			child.once('close', (exitCode) => resolve(exitCode ?? 1))
 		})
 		builds.delete(child)
-		if (code === 0) return true
-		// A checkout whose runner still starts programs straight from the build output has one
-		// running. Windows cannot replace a running program but can rename it, which leaves that
-		// one running.
-		const locked = failure
-			.map((line) => /failed to remove file `(.+\.exe)`/.exec(line)?.[1])
-			.find(Boolean)
-		if (retried || !locked || !failure.some((line) => line.includes('Access is denied'))) {
-			return false
+		return code === 0
+	} finally {
+		try {
+			NodeFS.rmSync(running, { force: true })
+		} catch {
+			// Held open for a moment, as Windows does: `cargoRunning` removes it later.
 		}
-		NodeFS.renameSync(locked, `${locked}.${Date.now()}.old`)
-		runnerLog('info', `${spec.label} moved a running ${NodePath.basename(locked)} aside`)
 	}
 }
 
 /**
- * Every build runs Cargo from one path, a link to the checkout it builds, so what it compiles
- * holds the same paths whichever checkout that was. Otherwise the compiler's incremental state,
- * the paths build scripts record and `CARGO_MANIFEST_DIR` belong to one checkout, and the next
- * checkout compiles those crates from scratch. Builds take turns, so one link serves them all. It
- * sits beside the primary checkout, not in it, so Cargo reads no `.cargo` folder above it.
+ * Starts a new build output from the third-party crates of the checkout that ran Cargo last, so
+ * only this repo's crates compile. On a ReFS Dev Drive each copy is a block clone that takes no
+ * disk space until one side changes. A source that runs Cargo during the copy may be half written,
+ * so that copy is dropped and the next source tried. With none, Cargo compiles everything.
  */
-function linkCheckout(targetDir: string, checkout: string): string {
-	const link = `${NodePath.resolve(targetDir, '..', '..')}-checkout`
-	NodeFS.rmSync(link, { force: true })
-	// A junction on Windows, which needs no elevation.
-	NodeFS.symlinkSync(checkout, link, 'junction')
-	return link
+export async function seedBuildOutput(
+	worktree: string,
+	targetDir: string,
+	/** This repo's crates, which compile from `worktree` and are never taken from another. */
+	ours: ReadonlySet<string>,
+	label: string,
+): Promise<void> {
+	// Unknown when the manifests do not read, and their output elsewhere is from other files.
+	if (ours.size === 0) return
+	// tauri's build script lists the files in its output folder by absolute path, so it runs again
+	// for this folder instead of pointing into the source.
+	const compiledHere = new Set([...ours, 'tauri'])
+	const sources = git(['worktree', 'list', '--porcelain'], worktree)
+		.split(/\r?\n/)
+		.filter((line) => line.startsWith('worktree '))
+		.map((line) => NodePath.join(line.slice('worktree '.length), 'target', 'dev'))
+		.filter((source) => !samePath(source, targetDir))
+		.flatMap((source) => {
+			try {
+				return [{ source, at: NodeFS.statSync(NodePath.join(source, CARGO_STARTED)).mtimeMs }]
+			} catch {
+				return []
+			}
+		})
+		.sort((left, right) => right.at - left.at)
+	const debug = NodePath.join(targetDir, 'debug')
+	for (const { source } of sources) {
+		const seeding = NodePath.join(targetDir, `seeding.${process.pid}.${NodeCrypto.randomUUID()}`)
+		const before = idleRun(source)
+		if (!before || !NodeFS.existsSync(NodePath.join(source, 'debug', '.fingerprint'))) continue
+		const started = performance.now()
+		try {
+			await copyBuildOutput(NodePath.join(source, 'debug'), seeding, compiledHere)
+			if (idleRun(source) !== before) {
+				runnerLog('info', `${label} dropped a copy of ${source}, which ran Cargo meanwhile`)
+				continue
+			}
+			NodeFS.renameSync(seeding, debug)
+			runnerLog(
+				'info',
+				`${label} started its build output from ${source} in ${Math.round((performance.now() - started) / 1000)}s`,
+			)
+			return
+		} catch (error) {
+			// Another runner in this checkout seeded it first.
+			if (NodeFS.existsSync(debug)) return
+			runnerLog('warning', `${label} could not copy ${source}: ${String(error)}`)
+		} finally {
+			try {
+				NodeFS.rmSync(seeding, { force: true, recursive: true })
+			} catch {
+				// Held open for a moment, as Windows does: `cargoRunning` removes it later.
+			}
+		}
+	}
+}
+
+/** The latest Cargo run in a build output, while none runs there. */
+function idleRun(targetDir: string): string | undefined {
+	try {
+		// Read before the markers, the reverse of the order `runCargo` writes them.
+		const run = NodeFS.readFileSync(NodePath.join(targetDir, CARGO_STARTED), 'utf8')
+		return cargoRunning(targetDir) ? undefined : run
+	} catch {
+		return undefined
+	}
+}
+
+/**
+ * Whether a Cargo run is in progress in a build output, by its runner's or Cargo's process. Removes
+ * what killed runners left: their markers, which a reused process ID would keep alive, and copies.
+ */
+function cargoRunning(targetDir: string): boolean {
+	let running = false
+	for (const entry of NodeFS.readdirSync(targetDir)) {
+		const [name, pid] = entry.split('.')
+		if (name !== CARGO_RUNNING && name !== 'seeding') continue
+		const file = NodePath.join(targetDir, entry)
+		const pids = [Number(pid)]
+		try {
+			if (name === CARGO_RUNNING) pids.push(Number(NodeFS.readFileSync(file, 'utf8')))
+		} catch {
+			// Removed this instant.
+		}
+		if (pids.some((alive) => alive > 0 && processIsRunning(alive))) {
+			running ||= name === CARGO_RUNNING
+			continue
+		}
+		try {
+			NodeFS.rmSync(file, { force: true, recursive: true })
+		} catch {
+			// Held open for a moment, as Windows does: a later run removes it.
+		}
+	}
+	return running
+}
+
+/**
+ * Copies the third-party part of `from` (a build output's `debug`), several files at a time,
+ * leaving out the crates in `skipped` and files Cargo is writing or removing.
+ */
+async function copyBuildOutput(
+	from: string,
+	to: string,
+	skipped: ReadonlySet<string>,
+): Promise<void> {
+	const files: Array<readonly [string, string]> = []
+	const walk = (source: string, target: string, top: boolean) => {
+		NodeFS.mkdirSync(target, { recursive: true })
+		for (const entry of NodeFS.readdirSync(source, { withFileTypes: true })) {
+			// The compiler's own scratch files and folders.
+			if (entry.name.startsWith('.tmp') || entry.name.startsWith('rmeta')) continue
+			// `build` and `.fingerprint` hold a `<crate>-<hash>` folder per crate.
+			if (top && skipped.has(/^(.+)-[0-9a-f]{16}$/.exec(entry.name)?.[1] ?? '')) continue
+			const pair = [NodePath.join(source, entry.name), NodePath.join(target, entry.name)] as const
+			if (entry.isDirectory()) walk(...pair, false)
+			else if (entry.isFile()) files.push(pair)
+		}
+	}
+	for (const folder of SEEDED_FOLDERS) {
+		if (!NodeFS.existsSync(NodePath.join(from, folder))) continue
+		walk(NodePath.join(from, folder), NodePath.join(to, folder), folder !== 'deps')
+	}
+	let next = 0
+	let failed = false
+	const copy = async () => {
+		while (!failed && next < files.length) {
+			const [source, target] = files[next++]!
+			try {
+				// Windows keeps the file's times, which Cargo compares; elsewhere they are copied over.
+				await NodeFS.promises.copyFile(source, target, NodeFS.constants.COPYFILE_FICLONE)
+				if (process.platform !== 'win32') {
+					const { atime, mtime } = await NodeFS.promises.stat(source)
+					await NodeFS.promises.utimes(target, atime, mtime)
+				}
+			} catch (error) {
+				if (isRecord(error) && error.code === 'ENOENT') continue
+				failed = true
+				throw error
+			}
+		}
+	}
+	// Every copy stops before the caller removes the folder.
+	const copies = await Promise.allSettled(Array.from({ length: SEED_COPIES }, copy))
+	const rejected = copies.find((copy) => copy.status === 'rejected')
+	if (rejected) throw rejected.reason
 }
 
 /**
  * What Cargo runs with. `RUSTC_BOOTSTRAP` changes every crate's fingerprint, so one shell that sets
- * it would compile everything again for every checkout, and the next shell without it again.
+ * it would compile everything again, and the next shell without it again.
  */
 function cargoEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const { RUSTC_BOOTSTRAP: _, ...rest } = env
 	return rest
-}
-
-/**
- * One build at a time across every checkout, or gives up with `undefined` once the runner is
- * stopping. Checkouts that share a build output need it: Cargo puts the finished program at the
- * same path for all of them. It also keeps several compiles from taking the whole machine.
- */
-async function lockBuilds(
-	cache: string,
-	label: string,
-	stopped: () => boolean,
-): Promise<(() => void) | undefined> {
-	NodeFS.mkdirSync(cache, { recursive: true })
-	const lock = NodePath.join(cache, BUILD_LOCK)
-	const owner = NodePath.join(lock, 'pid')
-	for (let waited = false; ;) {
-		try {
-			NodeFS.mkdirSync(lock)
-			break
-		} catch (error) {
-			if (!isRecord(error) || error.code !== 'EEXIST') throw error
-		}
-		let stale: boolean
-		try {
-			// A runner that was killed mid-build leaves its lock behind.
-			stale =
-				!processIsRunning(Number(NodeFS.readFileSync(owner, 'utf8'))) ||
-				Date.now() - NodeFS.statSync(lock).mtimeMs > BUILD_LOCK_STALE_MS
-		} catch {
-			// Taken or released this instant.
-			stale = false
-		}
-		if (stale) {
-			NodeFS.rmSync(lock, { recursive: true, force: true })
-			continue
-		}
-		if (!waited) runnerLog('info', `${label} waiting for another build to finish`)
-		waited = true
-		await new Promise((resolve) => setTimeout(resolve, 1_000))
-		if (stopped()) return undefined
-	}
-	NodeFS.writeFileSync(owner, String(process.pid))
-	return () => NodeFS.rmSync(lock, { recursive: true, force: true })
 }
 
 /** Numbered by place in the stack, so the same folder serves whatever a fixture names its App. */
@@ -1944,11 +2087,11 @@ function pipeOutput(
 }
 
 /**
- * Commands come from stdin and from `.data/dev-commands`: a runner started detached (by an agent,
- * or from another terminal) has no usable stdin, so appending a line to that file is the way to
- * send it `rs core:1`, `stop backend`, or `quit`. The file is emptied when the runner starts.
- * `halt` and `stack` are how a fixture swaps the data: stop what holds it, then start the stack
- * file it wrote.
+ * Commands come from stdin and from `.data/dev-commands`: another terminal, or an agent whose
+ * background task holds the runner, cannot type into its stdin, so appending a line to that file
+ * is the way to send it `rs core:1`, `stop backend`, or `quit`. The file is emptied when the
+ * runner starts. `halt` and `stack` are how a fixture swaps the data: stop what holds it, then
+ * start the stack file it wrote.
  *
  * A `stop` or `rs` may end in `#<id>`. `answered` is called with that id once that very request
  * has finished, which is how its sender tells it from an earlier state or another restart.
@@ -2071,6 +2214,8 @@ function isNoisyProgressLine(line: string): boolean {
 	return (
 		/^\s*Finished\s+/.test(line) ||
 		/^\s*(?:Building|Checking|Fetch)\s+\[[= >-]+\]/.test(line) ||
+		// The timing log keeps what the report said, then removes it.
+		/^\s*Timing report saved to /.test(line) ||
 		/^Browserslist: browsers data \(caniuse-lite\) is .+ old\./.test(line) ||
 		/^\s*npx update-browserslist-db@latest$/.test(line) ||
 		/^\s*Why you should do it regularly: https:\/\/github\.com\/browserslist\/update-db#readme$/.test(
@@ -2112,11 +2257,6 @@ function canListen(port: number, host: string): Promise<boolean> {
 		server.once('error', () => resolve(false))
 		server.listen({ host, port }, () => server.close(() => resolve(true)))
 	})
-}
-
-function requiredPortNames(accountWeb = true): ReadonlyArray<PortName> {
-	const names = ['app', 'backend', 'accountWeb', 'core'] as const
-	return names.filter((name) => accountWeb || name !== 'accountWeb')
 }
 
 function stableHash(value: string): number {
@@ -2265,17 +2405,30 @@ function readLiveRuntime(paths: WorktreePaths): RuntimeFile | undefined {
 	return runtime.pid && processIsRunning(runtime.pid) ? runtime : undefined
 }
 
+/**
+ * The live runtime file, once its PID is checked to be the runner that wrote it: a runner killed
+ * outright leaves its PID behind, and Windows hands PIDs out again, to other runners too. The
+ * check is slow, so ask it once.
+ */
+function readRunner(paths: WorktreePaths): RuntimeFile | undefined {
+	const runtime = readLiveRuntime(paths)
+	return runtime?.pid && runtime.started && processStarted(runtime.pid) === runtime.started
+		? runtime
+		: undefined
+}
+
 function processIsRunning(pid: number): boolean {
 	try {
 		process.kill(pid, 0)
 		return true
-	} catch {
-		return false
+	} catch (error) {
+		// Running, as another user or elevated.
+		return isRecord(error) && error.code === 'EPERM'
 	}
 }
 
-// A recorded PID can be reused by an unrelated process after a crash or reboot.
-function processIsDevRunner(pid: number): boolean {
+/** When the process with `pid` was created, as the OS reports it, or `undefined` when none runs. */
+function processStarted(pid: number): string | undefined {
 	const result =
 		process.platform === 'win32'
 			? NodeChildProcess.spawnSync(
@@ -2283,24 +2436,19 @@ function processIsDevRunner(pid: number): boolean {
 					[
 						'-NoProfile',
 						'-Command',
-						`(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+						`(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate.ToFileTimeUtc()`,
 					],
 					{ encoding: 'utf8', windowsHide: true },
 				)
-			: NodeChildProcess.spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' })
-	return result.status === 0 && result.stdout.includes('dev-runner')
+			: NodeChildProcess.spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' })
+	return (result.status === 0 && result.stdout.trim()) || undefined
 }
 
 /** The ports the stack's programs listen on, by program label. */
 function programPorts(runtime: RuntimeFile): ReadonlyMap<string, number> {
-	const labels = sharedLabels(runtime.accountWeb)
-	const shared = [
+	return new Map<string, number>([
 		['backend', runtime.ports.backend],
-		['account-web', runtime.ports.accountWeb],
 		['app-frontend', runtime.ports.app],
-	] as const
-	return new Map([
-		...shared.filter(([label]) => labels.includes(label)),
 		...runtime.cores.map((core) => [`core:${core.index}`, Number(new URL(core.url).port)] as const),
 	])
 }
@@ -2309,9 +2457,10 @@ function programPorts(runtime: RuntimeFile): ReadonlyMap<string, number> {
 async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
 	const expected = (label: string) => runtime.programs[label] !== 'stopped'
 	const ports = [...programPorts(runtime)].filter(([label]) => expected(label))
+	// Read before the first wait: the runner asks this of its own record, which a fixture replaces.
+	const apps = runtime.apps.filter((app) => expected(`app:${app.index}`))
 	const open = await Promise.all(ports.map(([, port]) => portIsOpen(port)))
 	if (!open.every(Boolean)) return false
-	const apps = runtime.apps.filter((app) => expected(`app:${app.index}`))
 	const answering = await Promise.all(apps.map((app) => appAnswers(app.tabUrl)))
 	if (!answering.every(Boolean)) return false
 	return apps.length === 0 || appPageLoads(runtime.urls.app)
@@ -2333,7 +2482,7 @@ async function appAnswers(tabUrl: string | undefined): Promise<boolean> {
  * Whether the frontend serves the App's page: the modules that start it (the entry, and the App
  * and routes it imports) and the dependencies they import. In a new checkout the frontend server
  * spends a minute or two preparing those, and holds the requests until it is done, so asking here
- * keeps that wait inside `up`.
+ * keeps that wait inside the command that waits for the stack.
  */
 async function appPageLoads(frontendUrl: string): Promise<boolean> {
 	/** The file's text, or `undefined` when the server answered with an error. */
@@ -2363,7 +2512,7 @@ async function appPageLoads(frontendUrl: string): Promise<boolean> {
 }
 
 /**
- * The App's page does not compile, so it will never load: `up` stops waiting and shows why. The
+ * The App's page does not compile, so it will never load: whoever waits for the stack stops and shows why. The
  * frontend server answers such a request with an error page that carries the compiler's error.
  */
 class PageError extends DevRunnerError {
@@ -2398,20 +2547,19 @@ function portIsOpen(port: number): Promise<boolean> {
 
 /** Prints what is running and where. Returns whether everything is ready to use. */
 async function printStatus(paths: WorktreePaths): Promise<boolean> {
-	const runtime = readLiveRuntime(paths)
+	const runtime = readRunner(paths)
 	if (!runtime) {
-		runnerLog('info', 'not running. Start it with: vp run up')
+		runnerLog('info', NOT_RUNNING)
 		return false
 	}
 	let ready = false
 	let pageError: string | undefined
 	try {
-		ready = await runtimeIsReady(runtime)
+		ready = !runtime.starting && (await runtimeIsReady(runtime))
 	} catch (error) {
 		if (!(error instanceof PageError)) throw error
 		pageError = error.message
 	}
-	const labels = sharedLabels(runtime.accountWeb)
 	const state = pageError ? 'page does not compile' : ready ? 'ready' : 'starting'
 	runnerLog('info', `dev PID ${runtime.pid} · ${state}`)
 	if (pageError) runnerLog('error', pageError)
@@ -2420,12 +2568,7 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 		const program = runtime.programs[label]
 		return program && program !== 'running' ? ` · ${program}` : ''
 	}
-	if (labels.includes('backend')) {
-		runnerLog('info', `backend ${runtime.urls.backend}${note('backend')}`)
-	}
-	if (labels.includes('account-web')) {
-		runnerLog('info', `account-web ${runtime.urls.accountWeb}${note('account-web')}`)
-	}
+	runnerLog('info', `backend ${runtime.urls.backend}${note('backend')}`)
 	for (const core of runtime.cores) {
 		runnerLog('info', `core:${core.index} ${core.url}${note(`core:${core.index}`)}`)
 	}
@@ -2437,85 +2580,90 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	return ready
 }
 
-/** Where a command leaves its environment for the background runner it starts on Windows. */
-function runnerEnvPath(worktree: string): string {
-	return NodePath.join(worktree, '.data', 'runner-env.json')
+/** `status --wait`: waits until the stack that is starting is ready, or says why it is not. */
+async function waitUntilReady(paths: WorktreePaths): Promise<void> {
+	// A `dev` started a moment ago has not written its runtime file yet, and the file it replaces
+	// can name a PID that is now another process's.
+	const deadline = Date.now() + 30_000
+	while (!readRunner(paths)) {
+		if (Date.now() > deadline) throw new DevRunnerError(NOT_RUNNING)
+		await new Promise((resolve) => setTimeout(resolve, 500))
+	}
+	const stack = connectStack(paths)
+	const until = Date.now() + READY_WAIT_MS
+	try {
+		await untilStarted(stack.runner.runtime, until)
+		await stack.ready(until)
+	} catch (error) {
+		if (!(error instanceof StillStarting)) throw error
+		runnerLog('warning', `${error.message} Run vp run status --wait again to keep waiting.`)
+	}
 }
 
 /**
- * Starts a dev runner that outlives this command and writes to the dev log. Returns its PID.
- *
- * On Windows `vp run` puts its command in a job that kills every process in it when vp returns,
- * and a child cannot leave that job. So Windows itself is asked to create the runner, which makes
- * it nobody's child. Such a process gets a fresh environment, so this one's is left in a file.
+ * Waits until no other fixture is being applied to this checkout's stack, then holds the turn
+ * until the returned function is called: two applies at once would replace each other's data.
  */
-function startRunner(paths: WorktreePaths, input: RunnerInput): number {
-	NodeFS.mkdirSync(paths.data, { recursive: true })
-	const args = [
-		NodeURL.fileURLToPath(import.meta.url),
-		'dev',
-		...(input.accountWeb ? [] : ['--no-account-web']),
-		...(input.hideWindows ? ['--hide-windows'] : []),
-		...(input.held ? ['--held'] : []),
-		'--background',
-	]
-	let pid: number | undefined
-	if (process.platform === 'win32') {
-		NodeFS.writeFileSync(runnerEnvPath(paths.worktree), JSON.stringify(process.env), {
-			mode: 0o600,
-		})
-		// `ShowWindow = 0` keeps its console off the desktop.
-		const create = [
-			'$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }',
-			'(Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:RUNNER_COMMAND; CurrentDirectory = $env:RUNNER_DIRECTORY; ProcessStartupInformation = $startup }).ProcessId',
-		].join('; ')
-		const created = NodeChildProcess.spawnSync(
-			'powershell.exe',
-			['-NoProfile', '-Command', create],
-			{
-				encoding: 'utf8',
-				env: {
-					...process.env,
-					RUNNER_COMMAND: [process.execPath, ...args].map((part) => `"${part}"`).join(' '),
-					RUNNER_DIRECTORY: paths.worktree,
-				},
-				windowsHide: true,
-			},
-		)
-		pid = Number(created.stdout.trim()) || undefined
-		if (!pid) throw new DevRunnerError(`Could not start the dev runner. ${created.stderr.trim()}`)
-	} else {
-		const started = NodeChildProcess.spawn(process.execPath, args, {
-			cwd: paths.worktree,
-			detached: true,
-			stdio: 'ignore',
-		})
-		started.unref()
-		pid = started.pid
-		if (!pid) throw new DevRunnerError('Could not start the dev runner.')
+export async function fixtureTurn(data: string): Promise<() => void> {
+	const lock = fixtureLockPath(data)
+	const holder = () => {
+		try {
+			return NodeFS.readFileSync(lock, 'utf8')
+		} catch {
+			return undefined
+		}
 	}
-	runnerLog('info', `started PID ${pid}`)
-	return pid
+	const mine = String(process.pid)
+	let told = false
+	for (;;) {
+		try {
+			NodeFS.writeFileSync(lock, mine, { flag: 'wx' })
+			// `dev` and `down` clear a turn left by a killed apply, and another may hold it by then.
+			return () => {
+				if (holder() === mine) NodeFS.rmSync(lock, { force: true })
+			}
+		} catch (error) {
+			if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+		}
+		const seen = holder()
+		// Empty while its writer is still writing it. Read again before removing it: another waiter
+		// may already have taken the turn over.
+		if (seen && !processIsRunning(Number(seen))) {
+			if (holder() === seen) NodeFS.rmSync(lock, { force: true })
+			continue
+		}
+		if (seen && !told) {
+			runnerLog('info', `Another fixture is being applied (PID ${seen}). This one waits for it.`)
+			told = true
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500))
+	}
+}
+
+function fixtureLockPath(data: string): string {
+	return NodePath.join(data, 'fixture.lock')
 }
 
 /**
- * What a runner with no terminal does first: take the environment of the command that started
- * it, and write everything it and its programs print to the dev log.
+ * Waits until the stack's first start is done, failing at `deadline`. Until then the runner
+ * starts its own stack, which would replace any data put in before it.
  */
-function runInBackground(): void {
-	const env = runnerEnvPath(process.cwd())
-	if (NodeFS.existsSync(env)) {
-		Object.assign(process.env, JSON.parse(NodeFS.readFileSync(env, 'utf8')))
-		NodeFS.rmSync(env)
+async function untilStarted(
+	runtime: () => RuntimeFile | undefined,
+	deadline = Date.now() + READY_WAIT_MS,
+): Promise<void> {
+	let told = false
+	for (;;) {
+		// The runner rewrites its file as it works, so one read can come back empty.
+		const current = runtime()
+		if (current && !current.starting) return
+		if (current && !told) {
+			runnerLog('info', 'Waiting for the stack to finish starting.')
+			told = true
+		}
+		if (Date.now() > deadline) throw new StillStarting('The stack is still starting.')
+		await new Promise((resolve) => setTimeout(resolve, 500))
 	}
-	NodeFS.mkdirSync(NodePath.join(process.cwd(), '.data'), { recursive: true })
-	const log = NodeFS.openSync(NodePath.join(process.cwd(), '.data', 'dev.log'), 'w')
-	const write = (chunk: string | Uint8Array) => {
-		NodeFS.writeSync(log, chunk as string)
-		return true
-	}
-	process.stdout.write = write as typeof process.stdout.write
-	process.stderr.write = write as typeof process.stderr.write
 }
 
 /** Sends the running dev runner one line, the way `rs` and `stop` reach it. */
@@ -2524,29 +2672,65 @@ function sendRunnerCommand(paths: WorktreePaths, command: string): void {
 }
 
 /**
- * The dev stack a fixture or a scenario fills, started with its data held when none is running.
- * `runner` is what the fixture package's helpers talk to it through.
+ * The running stack, or one started for this command and stopped by `release`, so a command that
+ * needs a stack leaves none behind. A stack started here waits for the command's fixture.
  */
-export function connectStack(paths: WorktreePaths, input: RunnerInput) {
-	const live = readLiveRuntime(paths)
-	// An App decides whether to show its window when it starts, so asking a running one is too late.
-	if (live?.hideWindows && !input.hideWindows) {
-		throw new DevRunnerError('Already running with App windows hidden. Run vp run down first.')
+export async function holdStack(
+	paths: WorktreePaths,
+): Promise<{ readonly release: () => Promise<void> }> {
+	if (readRunner(paths)) {
+		await untilStarted(connectStack(paths).runner.runtime)
+		return { release: async () => {} }
 	}
-	const started = live ? undefined : startRunner(paths, { ...input, held: true })
+	const child = NodeChildProcess.spawn(
+		process.execPath,
+		[NodeURL.fileURLToPath(import.meta.url), 'dev', '--held', '--hide-windows'],
+		{ cwd: paths.worktree, stdio: 'ignore', windowsHide: true },
+	)
+	let running = true
+	const exited = new Promise<void>((resolve) =>
+		child.once('close', () => {
+			running = false
+			resolve()
+		}),
+	)
+	for (;;) {
+		const runtime = readLiveRuntime(paths)
+		if (runtime && runtime.pid === child.pid && !runtime.starting) break
+		if (!running) throw new DevRunnerError(`The dev stack stopped. See ${devLogPath(paths)}`)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+	}
+	runnerLog('info', `Started a stack for this run. It stops when the run ends.`)
+	return {
+		release: async () => {
+			// Once it has exited, the command file is another runner's.
+			if (running) sendRunnerCommand(paths, 'quit')
+			await exited
+		},
+	}
+}
+
+/**
+ * The running stack, which a fixture or a scenario fills. `runner` is what the fixture package's
+ * helpers talk to it through.
+ */
+export function connectStack(paths: WorktreePaths) {
+	const live = readRunner(paths)
+	if (!live?.pid) throw new DevRunnerError(NOT_RUNNING)
+	const pid = live.pid
 	/** The runner this command talks to, or an error once it can no longer finish the job. */
 	const runtime = (): RuntimeFile | undefined => {
-		if (started && !processIsRunning(started)) {
-			throw new DevRunnerError(`The dev runner stopped. See ${devLogPath(paths)}`)
+		if (!processIsRunning(pid)) {
+			throw new DevRunnerError(`The dev stack stopped. See ${devLogPath(paths)}`)
 		}
 		const current = readLiveRuntime(paths)
 		if (current?.buildFailed) {
 			throw new DevRunnerError(`${current.buildFailed} did not build. See ${devLogPath(paths)}`)
 		}
-		return current && (!started || current.pid === started) ? current : undefined
+		return current
 	}
 	return {
-		wasRunning: live !== undefined,
+		live,
 		runner: {
 			data: paths.data,
 			primary: paths.primary,
@@ -2554,28 +2738,19 @@ export function connectStack(paths: WorktreePaths, input: RunnerInput) {
 			send: (command: string) => sendRunnerCommand(paths, command),
 			worktree: paths.worktree,
 		},
-		/** Resolves once the runner answers. Its Apps and Cores may still be held or starting. */
-		async answering(): Promise<RuntimeFile> {
-			for (;;) {
-				const current = runtime()
-				if (current) return current
-				await new Promise((resolve) => setTimeout(resolve, 200))
-			}
-		},
 		/** Resolves once everything that is meant to run answers. */
-		async ready(): Promise<RuntimeFile> {
-			const deadline = Date.now() + UP_WAIT_MS
+		async ready(deadline = Date.now() + READY_WAIT_MS): Promise<RuntimeFile> {
 			for (;;) {
 				// The runner rewrites its file as it works, so one read can come back empty.
 				const current = runtime()
 				if (current && (await runtimeIsReady(current))) return current
-				if (Date.now() > deadline) throw new DevRunnerError('The stack did not become ready.')
+				if (Date.now() > deadline) throw new StillStarting('The stack is not ready yet.')
 				await new Promise((resolve) => setTimeout(resolve, 500))
 			}
 		},
 		/** Resolves once the frontend serves the App's page, which `ready` asks only of a stack with Apps. */
 		async pageLoads(): Promise<void> {
-			const deadline = Date.now() + UP_WAIT_MS
+			const deadline = Date.now() + READY_WAIT_MS
 			for (;;) {
 				const current = runtime()
 				if (current?.programs['app-frontend'] === 'failed') {
@@ -2590,10 +2765,11 @@ export function connectStack(paths: WorktreePaths, input: RunnerInput) {
 }
 
 /**
- * `fixture <name>`: the whole setup in one command. Starts the dev stack when none is running,
- * replaces its data with what the fixture builds, and prints where to reach it.
+ * `fixture <name>`: replaces the running stack's data with what the fixture builds, waits until
+ * it is ready, and prints where to reach it.
  */
-async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInput): Promise<void> {
+async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
+	const stack = connectStack(paths)
 	const source = (file: string) =>
 		NodeURL.pathToFileURL(NodePath.join(paths.worktree, 'packages', 'fixtures', 'src', file)).href
 	// First, so the kit's own imports of the contracts resolve.
@@ -2604,31 +2780,39 @@ async function applyFixture(paths: WorktreePaths, name: string, input: RunnerInp
 		process.exitCode = 1
 		return
 	}
-	const stack = connectStack(paths, input)
+	const first = process.env[FIRST_APPLY] === String(stack.live.pid)
+	if (!first) await untilStarted(stack.runner.runtime)
+	const release = await fixtureTurn(paths.data)
 	const waitStarted = performance.now()
 	const record = (result: 'ok' | 'failed') =>
 		recordTiming(paths.primary, {
 			kind: 'fixture',
 			worktree: paths.worktree,
 			result,
-			startedRunner: !stack.wasRunning,
 			fixture: NodePath.basename(file),
 			ms: { total: Math.round(performance.now() - waitStarted) },
 		})
 	try {
-		await stack.answering()
 		await fixtures.runFixture({ ...stack.runner, file })
 		await stack.ready()
 	} catch (error) {
 		record('failed')
 		runnerLog('error', error instanceof Error ? error.message : String(error))
-		runnerLog('info', 'The stack stays up as far as the fixture got. Applying again starts over.')
+		// A runner whose first fixture fails stops its stack.
+		if (!first) {
+			runnerLog('info', 'The stack stays up as far as the fixture got. Applying again starts over.')
+		}
 		process.exitCode = 1
 		return
+	} finally {
+		release()
 	}
 	record('ok')
-	await printStatus(paths)
-	if (stack.wasRunning) runnerLog('info', 'Every App restarted, so reload any tab that was open.')
+	// The runner prints this for its first fixture, once it has taken it as applied.
+	if (!first) await printStatus(paths)
+	if (stack.live.apps.length > 0) {
+		runnerLog('info', 'Tabs keep their URLs. Reload an open one to see the new data.')
+	}
 }
 
 /** `stop <name>` and `rs <name>`: asks the runner, then waits until the program is there. */
@@ -2638,8 +2822,8 @@ async function sendProgramCommand(
 	args: ReadonlyArray<string>,
 ): Promise<void> {
 	const [name] = args
-	const before = readLiveRuntime(paths)
-	if (!before) throw new DevRunnerError('not running. Start it with: vp run up')
+	const before = readRunner(paths)
+	if (!before) throw new DevRunnerError(NOT_RUNNING)
 	const known = Object.keys(before.programs)
 	const app = before.apps.find((app) => String(app.index) === name || app.name === name)
 	const label = app ? `app:${app.index}` : name === 'core' ? 'core:1' : (name ?? '')
@@ -2651,8 +2835,9 @@ async function sendProgramCommand(
 	const request = NodeCrypto.randomUUID()
 	sendRunnerCommand(paths, `${command} ${label} #${request}`)
 	const wanted = command === 'stop' ? 'stopped' : 'running'
-	const deadline = Date.now() + UP_WAIT_MS
+	const deadline = Date.now() + READY_WAIT_MS
 	while (Date.now() < deadline) {
+		if (!processIsRunning(before.pid!)) throw new DevRunnerError('The stack stopped.')
 		const state = readLiveRuntime(paths)?.requests[request]
 		if (state === wanted) {
 			runnerLog('info', `${label} ${wanted}`)
@@ -2664,86 +2849,14 @@ async function sendProgramCommand(
 	throw new DevRunnerError(`${label} is still not ${wanted}. See ${devLogPath(paths)}`)
 }
 
-/**
- * Starts the dev stack in the background and returns once it is ready to use.
- */
-async function up(paths: WorktreePaths, input: RunnerInput): Promise<void> {
-	let started: number | undefined
-	const live = readLiveRuntime(paths)
-	// An App decides whether to show its window when it starts, so asking a running one is too late.
-	if (live?.hideWindows && !input.hideWindows) {
-		runnerLog('error', 'Already running with App windows hidden. Run vp run down first.')
-		process.exitCode = 1
-		return
-	}
-	if (!live) started = startRunner(paths, input)
-
-	const waitStarted = performance.now()
-	// How long an agent waited for a usable stack. `waiting` means up gave up before it was ready.
-	const record = (result: 'ok' | 'failed' | 'waiting') =>
-		recordTiming(paths.primary, {
-			kind: 'up',
-			worktree: paths.worktree,
-			result,
-			startedRunner: started !== undefined,
-			ms: { total: Math.round(performance.now() - waitStarted) },
-		})
-	const deadline = Date.now() + UP_WAIT_MS
-	while (Date.now() < deadline) {
-		if (started && !processIsRunning(started)) {
-			runnerLog('error', `The dev runner stopped while starting. See ${devLogPath(paths)}`)
-			process.exitCode = 1
-			record('failed')
-			return
-		}
-		const runtime = readLiveRuntime(paths)
-		// A runtime file left by an earlier run does not describe the runner started above.
-		const current = runtime && (!started || runtime.pid === started) ? runtime : undefined
-		if (current?.buildFailed) {
-			runnerLog('error', `${current.buildFailed} did not build. See ${devLogPath(paths)}`)
-			process.exitCode = 1
-			record('failed')
-			return
-		}
-		const failed = Object.entries(current?.programs ?? {}).find(([, state]) => state === 'failed')
-		if (failed) {
-			runnerLog('error', `${failed[0]} keeps exiting. See ${devLogPath(paths)}`)
-			process.exitCode = 1
-			record('failed')
-			return
-		}
-		let ready: boolean
-		try {
-			ready = current !== undefined && (await runtimeIsReady(current))
-		} catch (error) {
-			if (!(error instanceof PageError)) throw error
-			runnerLog(
-				'error',
-				`${error.message}\nThe stack is still running and picks up the fix by itself. Fix it, then run up again.`,
-			)
-			process.exitCode = 1
-			record('failed')
-			return
-		}
-		if (ready) {
-			await printStatus(paths)
-			record('ok')
-			return
-		}
-		await new Promise((resolve) => setTimeout(resolve, 500))
-	}
-	runnerLog(
-		'warning',
-		`Still starting. Run vp run up again to keep waiting. Log: ${devLogPath(paths)}`,
-	)
-	record('waiting')
-	// Not a failure: the runner is still working.
-}
-
 /** Stops the dev runner recorded in the runtime file, and everything it started. */
 async function down(paths: WorktreePaths): Promise<void> {
 	const runtime = readLiveRuntime(paths)
-	if (!runtime?.pid || !processIsDevRunner(runtime.pid)) {
+	if (!runtime?.pid || !readRunner(paths)) {
+		// Left by a runner that was killed, and its PID now belongs to something else.
+		if (runtime) writeRuntimeFile(paths, stoppedRuntime(runtime))
+		// No apply outlives its runner.
+		NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 		runnerLog('info', 'not running')
 		return
 	}
@@ -2772,6 +2885,8 @@ async function down(paths: WorktreePaths): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 200))
 	}
 	writeRuntimeFile(paths, stoppedRuntime(runtime))
+	// An apply killed with its runner leaves its turn behind.
+	NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 	runnerLog('info', `stopped PID ${runtime.pid}`)
 }
 
@@ -2795,9 +2910,6 @@ function printPlan(input: {
 	if (labels.includes('app-frontend')) runnerLog('info', `App http://localhost:${input.ports.app}`)
 	if (labels.includes('backend')) {
 		runnerLog('info', `Accounts and sharing http://127.0.0.1:${input.ports.backend} (local)`)
-	}
-	if (labels.includes('account-web')) {
-		runnerLog('info', `Account sign-in http://127.0.0.1:${input.ports.accountWeb}`)
 	}
 	if (input.shape?.cores) runnerLog('info', `Cores ${input.shape.cores}`)
 	if (input.shape?.apps.length) {

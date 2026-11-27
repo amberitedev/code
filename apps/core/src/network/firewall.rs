@@ -1,5 +1,6 @@
-//! This computer's own firewall. `copal install` opens it once, as admin, for Core's port and the
-//! server port range, and `copal uninstall` closes it again. Core never runs a firewall tool
+//! This computer's own firewall. `copal install` opens it once, as admin, for Core's port (TCP
+//! for the store and UDP for Connect) and the server port range, and `copal uninstall` closes it
+//! again. Core never runs a firewall tool
 //! after that, so it needs no permission to.
 //!
 //! Windows: one inbound rule named "Amberite Core", for private networks only, so public Wi-Fi
@@ -87,8 +88,24 @@ mod platform {
                 "profile=private",
             ],
         )?;
+        // A second rule under the same name, so `close` removes both.
+        run(
+            "netsh",
+            &[
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
+                &format!("name={RULE}"),
+                "dir=in",
+                "action=allow",
+                "protocol=UDP",
+                &format!("localport={core_port}"),
+                "profile=private",
+            ],
+        )?;
         Ok(vec![format!(
-            "Windows Firewall: rule \"{RULE}\" allows TCP {ports}"
+            "Windows Firewall: rule \"{RULE}\" allows TCP {ports} and UDP {core_port}"
         )])
     }
 
@@ -139,6 +156,11 @@ mod platform {
                 )?;
                 done.push(format!("ufw: allowed TCP {ports}"));
             }
+            run(
+                "ufw",
+                &["allow", &format!("{core_port}/udp"), "comment", "Copal"],
+            )?;
+            done.push(format!("ufw: allowed UDP {core_port}"));
         }
         if firewalld() {
             let range = range.replace(':', "-");
@@ -147,12 +169,13 @@ mod platform {
                 &[
                     "--permanent",
                     &format!("--add-port={core_port}/tcp"),
+                    &format!("--add-port={core_port}/udp"),
                     &format!("--add-port={range}/tcp"),
                 ],
             )?;
             run("firewall-cmd", &["--reload"])?;
             done.push(format!(
-                "firewalld: allowed TCP {core_port} and {range}"
+                "firewalld: allowed TCP {core_port} and {range}, and UDP {core_port}"
             ));
         }
         Ok(done)
@@ -169,6 +192,11 @@ mod platform {
                     done.push(format!("ufw: removed TCP {ports}"));
                 }
             }
+            if run("ufw", &["delete", "allow", &format!("{core_port}/udp")])
+                .is_ok()
+            {
+                done.push(format!("ufw: removed UDP {core_port}"));
+            }
         }
         if firewalld() {
             let range = range.replace(':', "-");
@@ -177,13 +205,14 @@ mod platform {
                 &[
                     "--permanent",
                     &format!("--remove-port={core_port}/tcp"),
+                    &format!("--remove-port={core_port}/udp"),
                     &format!("--remove-port={range}/tcp"),
                 ],
             );
             run("firewall-cmd", &["--reload"])?;
             if removed.is_ok() {
                 done.push(format!(
-                    "firewalld: removed TCP {core_port} and {range}"
+                    "firewalld: removed TCP {core_port} and {range}, and UDP {core_port}"
                 ));
             }
         }

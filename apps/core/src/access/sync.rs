@@ -6,7 +6,8 @@
 //! transaction as the change, and [`run`] sends it, retrying with backoff until the backend
 //! answers. On every start and reconnect Core also reports its state, so a lost report cannot
 //! leave the two apart. When the backend says this Core was removed from its account, Core
-//! un-pairs and shows a new pairing code.
+//! un-pairs and shows a new pairing code. While it is connected Core also holds the link its
+//! owner's devices are introduced on (see `link`).
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -29,9 +30,9 @@ use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use super::{Changed, CoreAccess, now, owed::OwedCall, pairing};
+use super::{Changed, CoreAccess, link, now, owed::OwedCall, pairing};
 use crate::{
-    network::{forward::Network, public_ip},
+    network::{connect::Connect, forward::Network, public_ip},
     storage::Storage,
 };
 
@@ -53,6 +54,8 @@ pub struct Sync {
     pub storage: Arc<Storage>,
     /// Told the join IP whenever the addresses are looked up.
     pub network: Arc<Network>,
+    /// Where introduced devices connect.
+    pub connect: Arc<Connect>,
     /// The engine's, which calls the backend with this Core's key.
     pub sessions: Sessions,
 }
@@ -157,7 +160,6 @@ fn backoff(failures: u32) -> Duration {
 pub async fn run(sync: Arc<Sync>) {
     let (sender, addresses) = watch::channel(sync.addresses(None).await);
     tokio::spawn(Arc::clone(&sync).watch_addresses(sender));
-    let mut failures = 0;
     loop {
         let address = addresses.borrow().local.clone();
         pairing::pair(&pairing::Pairing {
@@ -175,27 +177,41 @@ pub async fn run(sync: Arc<Sync>) {
             tokio::time::sleep(backoff(1)).await;
             continue;
         };
-        let lost = match sync.connect(&key, &addresses).await {
-            Ok(()) => {
-                failures = 0;
-                info!("connected to the backend");
-                sync.serve_owed(&key, &addresses).await
-            }
-            Err(lost) => lost,
-        };
-        match lost {
-            Lost::Removed => sync.unpair().await,
-            Lost::Unreachable(problem) => {
-                failures += 1;
-                let wait = backoff(failures);
-                warn!(%problem, "lost the backend, reconnecting in {}s", wait.as_secs());
-                tokio::time::sleep(wait).await;
-            }
+        // The link runs beside owed calls and retries on its own, so a call the backend keeps
+        // failing does not keep the owner's devices from being introduced. Either one ending
+        // means the backend removed this Core.
+        tokio::select! {
+            () = sync.serve(&key, &addresses) => {}
+            () = link::hold(&sync, &key) => {}
         }
+        sync.unpair().await;
     }
 }
 
 impl Sync {
+    /// Report this Core's state, then send owed calls as they come, reconnecting with backoff
+    /// whenever the backend is lost, until it says this Core was removed.
+    async fn serve(&self, key: &str, addresses: &watch::Receiver<Addresses>) {
+        let mut failures = 0;
+        loop {
+            let lost = match self.connect(key, addresses).await {
+                Ok(()) => {
+                    failures = 0;
+                    info!("connected to the backend");
+                    self.serve_owed(key, addresses).await
+                }
+                Err(lost) => lost,
+            };
+            let Lost::Unreachable(problem) = lost else {
+                return;
+            };
+            failures += 1;
+            let wait = backoff(failures);
+            warn!(%problem, "lost the backend, reconnecting in {}s", wait.as_secs());
+            tokio::time::sleep(wait).await;
+        }
+    }
+
     /// The backend key, which the engine is given too.
     async fn key(&self) -> Option<String> {
         let key: Option<String> =
@@ -565,8 +581,17 @@ mod tests {
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let access = Arc::new(CoreAccess::new(db.clone(), keys));
+        let network = Arc::new(Network::off(db.clone()));
         Sync {
-            network: Arc::new(Network::off(db.clone())),
+            connect: Arc::new(
+                Connect::open(
+                    (Ipv4Addr::LOCALHOST, 0).into(),
+                    connect::Identity::generate().unwrap(),
+                    Arc::clone(&network),
+                )
+                .unwrap(),
+            ),
+            network,
             storage: Arc::new(Storage::new(
                 db.clone(),
                 crate::daemon::paths::Paths::new(dir.path()),

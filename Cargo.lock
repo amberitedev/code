@@ -181,6 +181,7 @@ dependencies = [
  "chardetng",
  "chrono",
  "cidre",
+ "connect",
  "contracts",
  "dashmap",
  "data-url",
@@ -211,7 +212,6 @@ dependencies = [
  "png 0.18.1",
  "quartz_nbt",
  "rand 0.10.3",
- "rcgen",
  "reqwest 0.13.5",
  "rgb",
  "rustls",
@@ -235,7 +235,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-rustls",
  "tokio-util",
  "tower",
  "tracing",
@@ -2208,6 +2207,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "connect"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "hex",
+ "netdev",
+ "quinn",
+ "rand 0.10.3",
+ "rcgen",
+ "ring",
+ "rustls",
+ "sha2 0.11.1",
+ "socket2",
+ "tokio",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2338,6 +2354,7 @@ dependencies = [
  "chrono",
  "clap 4.6.7",
  "color-eyre",
+ "connect",
  "contracts",
  "crab_nat",
  "dunce",
@@ -3279,7 +3296,6 @@ dependencies = [
  "dunce",
  "either",
  "encoding_rs",
- "engine",
  "enumset",
  "flate2",
  "fs4",
@@ -8908,6 +8924,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chacha20poly1305",
+ "connect",
  "contracts",
  "futures",
  "hex",

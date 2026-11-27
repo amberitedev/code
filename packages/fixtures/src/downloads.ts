@@ -1,6 +1,7 @@
 // Game files (Minecraft, Java, loaders, server jars) are downloaded once per machine. Every App
-// and Core keeps its own `meta` folder; a cache beside the shared Rust builds fills a new one with
-// hard links, so nothing is copied and no two programs ever write the same folder.
+// and Core keeps its own `meta` folder; a cache in the primary checkout's `target/dev-shared`
+// fills a new one with hard links, so nothing is copied and no two programs ever write the same
+// folder.
 
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
