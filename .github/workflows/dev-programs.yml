@@ -72,7 +72,8 @@ jobs:
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "key=${artifact##*-}" >> "$GITHUB_OUTPUT"
       - run: node scripts/dev-runner.ts build
-      # A backtrace names its frames from these, which a program looks for beside itself.
+      # A backtrace names its functions from these, which a program looks for beside itself. They
+      # hold no line numbers: the toolchain action builds without them, and the download stays small.
       - run: cp target/dev-shared/debug/amberite_app.pdb target/dev-shared/debug/copal.pdb "target/dev-shared/dev-bin/${{ steps.build.outputs.key }}/"
         shell: bash
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

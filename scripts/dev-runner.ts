@@ -1335,6 +1335,8 @@ async function buildProgram(
 		runnerLog('info', `${spec.label} downloaded ${cached(key)}, built by CI`)
 	} else {
 		const started = performance.now()
+		// A stop that ended a download must not go on to compile.
+		if (stopped()) return undefined
 		const unlock = await lockBuilds(cache, spec.label, stopped)
 		if (!unlock) return undefined
 		const lockWait = performance.now() - started
@@ -1398,11 +1400,12 @@ async function buildProgram(
 }
 
 /** The artifact CI keeps a build's programs in, and a checkout with the same key looks for. */
-export function programsArtifact(key: string): string {
+function programsArtifact(key: string): string {
 	return `programs-${process.platform}-${process.arch}-${key}`
 }
 
 const PROGRAMS_WORKFLOW = '.github/workflows/dev-programs.yml'
+const PROGRAMS_BRANCH = 'main'
 
 /**
  * Fetches the programs CI built for this key into the cache, so a checkout whose Rust is on the
@@ -1410,16 +1413,15 @@ const PROGRAMS_WORKFLOW = '.github/workflows/dev-programs.yml'
  * or offline: the caller builds as before.
  *
  * The runner runs what it downloads, and a pull request can upload an artifact under any name. So
- * only a `from.event` run of the programs workflow counts, in this repository, for a commit that
- * is on `from.branch`.
+ * only a run of the programs workflow that someone with write access started counts, in this
+ * repository, for a commit that is on the default branch.
  */
-export async function downloadPrograms(
+async function downloadPrograms(
 	worktree: string,
 	build: Pick<ProgramBuild, 'cacheDir' | 'programs'>,
 	key: string,
 	children: Set<NodeChildProcess.ChildProcess>,
 	stopped: () => boolean,
-	from = { branch: 'main', event: 'push' },
 ): Promise<boolean> {
 	// CI builds them for Windows only.
 	if (process.platform !== 'win32') return false
@@ -1443,7 +1445,11 @@ export async function downloadPrograms(
 			child.stdout?.on('data', (chunk: Buffer) => {
 				output += chunk.toString()
 			})
-			child.once('error', () => resolve(undefined))
+			// A command that is not installed fails without closing.
+			child.once('error', () => {
+				children.delete(child)
+				resolve(undefined)
+			})
 			child.once('close', (code) => {
 				children.delete(child)
 				resolve(code === 0 ? output : undefined)
@@ -1464,8 +1470,11 @@ export async function downloadPrograms(
 	try {
 		// A runner that was killed mid-fetch could not remove its own.
 		for (const entry of NodeFS.existsSync(staging) ? NodeFS.readdirSync(staging) : []) {
-			if (!processIsRunning(Number(entry.split('.')[1]))) {
+			if (processIsRunning(Number(entry.split('.')[1]))) continue
+			try {
 				NodeFS.rmSync(NodePath.join(staging, entry), { recursive: true, force: true })
+			} catch {
+				// Still held, or another checkout is removing it: a later fetch tries again.
 			}
 		}
 		const listed = await api(`artifacts?name=${programsArtifact(key)}&per_page=100`)
@@ -1486,7 +1495,7 @@ export async function downloadPrograms(
 		for (const { expired, id, workflow_run: listing } of artifacts) {
 			if (
 				expired ||
-				listing?.head_branch !== from.branch ||
+				listing?.head_branch !== PROGRAMS_BRANCH ||
 				typeof listing.repository_id !== 'number' ||
 				listing.head_repository_id !== listing.repository_id
 			) {
@@ -1502,10 +1511,11 @@ export async function downloadPrograms(
 			}
 			const onBranch = await run(
 				'git',
-				['merge-base', '--is-ancestor', head_sha, `origin/${from.branch}`],
+				['merge-base', '--is-ancestor', head_sha, `origin/${PROGRAMS_BRANCH}`],
 				30_000,
 			)
-			if (event === from.event && path === PROGRAMS_WORKFLOW && onBranch !== undefined) {
+			const started = event === 'push' || event === 'workflow_dispatch'
+			if (started && path === PROGRAMS_WORKFLOW && onBranch !== undefined) {
 				trusted = id
 				break
 			}

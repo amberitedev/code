@@ -100,13 +100,14 @@ When the key has no program here, the runner looks for one CI built before it co
 [Dev programs](../../.github/workflows/dev-programs.yml) workflow builds every Rust change on `main`
 for Windows and keeps both programs for 90 days in an artifact named after the key, which `gh`
 downloads. So a checkout whose Rust is `main`'s compiles nothing, even on a machine that never built
-it. Two traps:
+it. A downloaded program's backtraces name functions but not lines, which keeps the download small.
+Two traps:
 
 - The key only matches when `packages/engine/.env` is the copy of `.env.prod` that setup makes, and
   no `.env.local` or environment variable overrides what it sets. Other settings give another key,
   and that checkout compiles its own.
-- Only an artifact that workflow made on a push to `main` of this repository, for a commit that is
-  on `main`, is taken. A pull request can upload one under any name, and the runner runs what it
+- Only an artifact that workflow made in this repository, on a push or a manual run, for a commit
+  that is on `main`, is taken. A pull request can upload one under any name, and the runner runs what it
   downloads.
 
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
