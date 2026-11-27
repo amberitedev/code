@@ -45,7 +45,6 @@ pub async fn hold(sync: &Sync, key: &str) {
     // A WebSocket upgrade needs HTTP/1.1, which the shared client would not offer over TLS.
     let http = crate::network::http()
         .http1_only()
-        .connect_timeout(OPEN_TIMEOUT)
         .build()
         .expect("a client with no custom TLS always builds");
     let mut failures = 0;

@@ -291,7 +291,6 @@ impl Incoming {
     /// address stays admitted for as long as the connection is kept.
     pub async fn accept(self) -> io::Result<Connection> {
         let ip = self.quinn.remote_address().ip();
-        let hold = self.socket.hold(ip);
         let quinn = self.quinn.await?;
         let peer = quinn
             .peer_identity()
@@ -309,7 +308,7 @@ impl Incoming {
         Ok(Connection {
             quinn,
             peer,
-            _hold: Some(hold),
+            _hold: Some(self.socket.hold(ip)),
         })
     }
 }

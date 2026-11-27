@@ -74,11 +74,12 @@ export class CoreLink extends DurableObject<Env> {
 	/** The Core was removed from its account: drop its link, so it learns at once. */
 	unlink(): void {
 		for (const socket of this.ctx.getWebSockets()) socket.close(1000, 'Removed')
+		for (const answer of this.waiting.values()) answer(null)
 	}
 
 	webSocketClose(socket: WebSocket): void {
-		socket.close()
 		this.gone(socket)
+		socket.close()
 	}
 
 	webSocketError(socket: WebSocket): void {

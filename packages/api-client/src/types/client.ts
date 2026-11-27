@@ -37,7 +37,7 @@ export type RequestHooks = {
  */
 export type CoreCallError = ApiError & { status: number | null }
 
-/** See `ClientConfig.coreSessions`. Each call rejects with a `CoreCallError`. */
+/** See `ClientConfig.coreSessions`. Each call rejects with a `CoreCallError` or an `ApiCallError`. */
 export interface CoreSessions {
 	/** Trade `ticket` for a session on the connected Core `coreId`, replacing any held. */
 	signIn(coreId: string, fingerprint: string, ticket: string): Promise<CoreSession>

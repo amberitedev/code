@@ -1,9 +1,10 @@
 import { PROTOCOL_VERSION } from '@amberite/contracts/protocol'
 import type { ListedCore } from '@amberite/contracts/backend'
-import type { Server } from '@amberite/contracts/core'
+import type { CoreSession, Server } from '@amberite/contracts/core'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'
+import { ApiCallError } from '../contracts/errors'
 import { READY_MS } from '../events/event-stream'
 import { Cores } from './cores'
 
@@ -55,13 +56,19 @@ const INTRODUCED = ['203.0.113.5:16662']
 
 /**
  * Lists `CORE`, which has `LISTED`. With `home` the Core answers on this computer's network.
- * Otherwise it is reached once the backend introduced this device, unless it is `off`.
+ * Otherwise it is reached once the backend introduced this device, unless it is `off` or no path
+ * between the two opens (`blocked`).
  */
 class FakeClient extends GenericModrinthClient {
 	/** What `connectCore` was given as the backend's introduction, per call. */
 	public connects: (string[] | undefined)[] = []
 	public introductions = 0
 	public off = false
+	public blocked = false
+	/** The tickets sign-ins were made with. */
+	public signIns: string[] = []
+	/** The next sign-in finds no connection to the Core. */
+	public signInOffline = false
 
 	constructor(private readonly home: boolean) {
 		super({
@@ -69,9 +76,26 @@ class FakeClient extends GenericModrinthClient {
 			connectCore: async (_coreId, _address, _fingerprint, introduced) => {
 				this.connects.push(introduced)
 				const base = 'http://127.0.0.1:5000/secret/core/0'
-				if (this.home) return { base, reached: this.off ? null : 'local', dialer: null }
-				if (introduced && !this.off) return { base, reached: 'internet', dialer: null }
-				return { base, reached: null, dialer: introduced ? null : DIALER }
+				const dialer = introduced ? null : DIALER
+				if (this.home)
+					return this.off
+						? { base, reached: null, dialer }
+						: { base, reached: 'local', dialer: null }
+				if (introduced && !this.off && !this.blocked)
+					return { base, reached: 'internet', dialer: null }
+				return { base, reached: null, dialer }
+			},
+			coreSessions: {
+				signIn: async (_coreId, _fingerprint, ticket) => {
+					this.signIns.push(ticket)
+					if (this.signInOffline) {
+						this.signInOffline = false
+						throw new ApiCallError(503, 'core_offline', 'This Core is not connected right now.')
+					}
+					return {} as CoreSession
+				},
+				signOut: async () => {},
+				exists: async () => false,
 			},
 			features: [new SelfHostedFeature({ baseUrl: ACCOUNTS, token: async () => undefined })],
 		})
@@ -87,6 +111,7 @@ class FakeClient extends GenericModrinthClient {
 				? Response.json({ error: 'core_offline', description: '' }, { status: 503 })
 				: Response.json({ candidates: INTRODUCED })
 		}
+		if (url === `${ACCOUNTS}/cores/${CORE.id}/ticket`) return Response.json({ ticket: 'ticket' })
 		if (url.endsWith('/health')) return Response.json({ protocol: PROTOCOL_VERSION })
 		if (url.endsWith('/servers')) return Response.json([LISTED])
 		return new Response(null, { status: 404 })
@@ -105,14 +130,31 @@ describe('connecting to a Core', () => {
 		expect(client.connects).toEqual([undefined])
 	})
 
-	it('dials a Core on this network again at once, since that costs the backend nothing', async () => {
+	it('dials a Core on this network again at once, while the backend waits to be asked again', async () => {
 		const client = new FakeClient(true)
 		client.off = true
 		await client.cores.url(CORE.id)
+		expect(client.introductions).toBe(1)
 		expect(await client.cores.reconnect(CORE.id)).toBe(false)
 		client.off = false
 		expect(await client.cores.reconnect(CORE.id)).toBe(true)
-		expect(client.introductions).toBe(0)
+		expect(client.introductions).toBe(1)
+	})
+
+	it('waits before asking the backend again when no path opened after an introduction', async () => {
+		const client = new FakeClient(false)
+		client.blocked = true
+		await client.cores.url(CORE.id)
+		expect(client.introductions).toBe(1)
+		expect(await client.cores.reconnect(CORE.id)).toBe(false)
+		expect(client.introductions).toBe(1)
+	})
+
+	it('signs in once connected when the Core was not, with the same unused ticket', async () => {
+		const client = new FakeClient(false)
+		client.signInOffline = true
+		await client.cores.signIn(CORE)
+		expect(client.signIns).toEqual(['ticket', 'ticket'])
 	})
 
 	it('has the backend introduce this device to a Core on another network', async () => {

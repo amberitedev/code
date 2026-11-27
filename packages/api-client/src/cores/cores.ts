@@ -210,17 +210,18 @@ export class Cores {
 			if (!fingerprint)
 				throw new ApiCallError(400, 'unsupported', 'This Core does not serve HTTPS yet')
 			const ticket = await this.ticket(core.id)
-			const signIn = () => this.sessions().signIn(core.id, fingerprint, ticket)
-			return signIn()
-				.catch(async (error: unknown) => {
-					// Nothing reached a Core the App had no connection to, so the ticket is unused.
-					const offline = isCoreCallError(error) && error.error === 'core_offline'
-					if (offline && (await this.reconnect(core.id))) return signIn()
-					throw error
-				})
-				.catch((error: unknown) => {
-					throw coreError(error)
-				})
+			const signIn = () =>
+				this.sessions()
+					.signIn(core.id, fingerprint, ticket)
+					.catch((error: unknown) => {
+						throw coreError(error)
+					})
+			return signIn().catch(async (error: unknown) => {
+				// Nothing reached a Core the App had no connection to, so the ticket is unused.
+				const offline = error instanceof ApiCallError && error.code === 'core_offline'
+				if (offline && (await this.reconnect(core.id))) return signIn()
+				throw error
+			})
 		})().finally(() => this.signingIn.delete(core.id))
 		this.signingIn.set(core.id, signing)
 		return signing
@@ -261,12 +262,10 @@ export class Cores {
 
 	/**
 	 * Connect again to a Core whose requests are answered `core_offline`: nothing was sent, so the
-	 * caller sends again when this is true. False at once while the backend was asked lately and
-	 * could not introduce this device.
+	 * caller sends again when this is true. The backend is asked again only after a wait (see
+	 * `connect`).
 	 */
 	public async reconnect(coreId: string): Promise<boolean> {
-		const waiting = this.unreached.get(coreId)
-		if (waiting && Date.now() < waiting.retryAt) return false
 		const route = await this.route(await this.core(coreId))
 		this.routes.set(coreId, route)
 		return route.reached !== null
@@ -373,17 +372,18 @@ export class Cores {
 		if (!connect || !core.cert_fingerprint) return { base: core.address, reached: null }
 		let route = await connect(core.id, core.address, core.cert_fingerprint)
 		const waiting = this.unreached.get(core.id)
+		// Only the backend's part waits: dialing a Core on this network costs it nothing.
 		const mayAsk = !waiting || Date.now() >= waiting.retryAt
-		if (!route.reached && route.dialer && mayAsk) {
+		const dialer = !route.reached && mayAsk ? route.dialer : null
+		if (dialer) {
 			const listener = await this.client.backend
-				.call(cores.Introduce, { params: { id: core.id }, body: route.dialer })
+				.call(cores.Introduce, { params: { id: core.id }, body: dialer })
 				.catch(() => null)
 			if (listener)
 				route = await connect(core.id, core.address, core.cert_fingerprint, listener.candidates)
 		}
 		if (route.reached) this.unreached.delete(core.id)
-		// Only the backend's part waits: dialing a Core on this network costs it nothing.
-		else if (route.dialer && mayAsk) {
+		else if (dialer) {
 			const failures = (waiting?.failures ?? 0) + 1
 			const wait = Math.min(FIRST_INTRODUCE_WAIT_MS * 2 ** (failures - 1), MAX_INTRODUCE_WAIT_MS)
 			this.unreached.set(core.id, { failures, retryAt: Date.now() + wait })
