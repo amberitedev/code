@@ -33,7 +33,7 @@
 	},
 	"dependencies": {
 		"@prettier/plugin-xml": "^3.4.2",
-		"prettier-plugin-sql-cst": "^0.26.2",
+		"prettier-plugin-sql-cst": "^0.26.1",
 		"prettier-plugin-toml": "^4.1.0"
 	},
 	"devDependencies": {
@@ -41,8 +41,8 @@
 		"@eslint/js": "^10.0.1",
 		"@nuxt/eslint-config": "^1.17.0",
 		"@vue/tsconfig": "^0.9.1",
-		"eslint": "^10.16.0",
-		"eslint-config-prettier": "^10.1.9",
+		"eslint": "^10.15.0",
+		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-prettier": "^5.5.7",
 		"eslint-plugin-simple-import-sort": "^14.0.0",
 		"eslint-plugin-turbo": "^2.11.13",
