@@ -37,8 +37,9 @@ function unwrap(node: Node | null | undefined): Node | undefined {
 	return current
 }
 
-function keyName(node: Node): string | undefined {
-	if (node.type === 'Identifier') return node.name
+/** A member or property key, when it is written out: `a.b`, `a['b']`, `{ b }`, never `a[b]`. */
+function keyName(node: Node, computed = false): string | undefined {
+	if (node.type === 'Identifier' && !computed) return node.name
 	if (node.type === 'Literal' && typeof node.value === 'string') return node.value
 	return undefined
 }
@@ -50,7 +51,7 @@ function calleePath(node: Node | null | undefined): ReadonlyArray<string> | unde
 	if (expression.type === 'Identifier') return [expression.name]
 	if (expression.type === 'CallExpression') return calleePath(expression.callee)
 	if (expression.type !== 'MemberExpression') return undefined
-	const property = keyName(expression.property)
+	const property = keyName(expression.property, expression.computed)
 	const object = calleePath(expression.object)
 	return property !== undefined && object ? [...object, property] : undefined
 }
@@ -61,15 +62,10 @@ function option(node: Node | undefined, keys: ReadonlySet<string>): Node | undef
 	if (expression?.type !== 'ObjectExpression') return undefined
 	for (const property of expression.properties) {
 		if (property.type !== 'Property') continue
-		const key = keyName(property.key)
+		const key = keyName(property.key, property.computed)
 		if (key !== undefined && keys.has(key)) return property.value
 	}
 	return undefined
-}
-
-const isNumber = (node: Node | undefined) => {
-	const expression = unwrap(node)
-	return expression?.type === 'Literal' && typeof expression.value === 'number'
 }
 
 /** `true` or a reason string turns a node:test option on; a variable is a platform gate. */
@@ -123,21 +119,36 @@ const noTestTimeoutOrUnquarantinedSkip = defineRule({
 					if (option(node.arguments[0], keys)) context.report({ node, message: TIMEOUT_MESSAGE })
 					return
 				}
+				// Whatever follows a hook's function is its timeout or options.
 				if (HOOKS.has(root!) && members.length === 0) {
-					const [, timeout] = node.arguments
-					if (isNumber(timeout) || option(timeout, new Set(['timeout']))) {
-						context.report({ node, message: TIMEOUT_MESSAGE })
-					}
+					if (node.arguments.length > 1) context.report({ node, message: TIMEOUT_MESSAGE })
 					return
 				}
 				if (!TESTS.has(root!)) return
-				const limits = new Set(['retry', 'timeout'])
-				if (isNumber(third) || option(second, limits) || option(third, limits)) {
-					context.report({ node, message: TIMEOUT_MESSAGE })
-				}
-				if (isOn(option(second, new Set(['only'])))) {
+				// `test(name, options, fn)`, or `test(name, fn, options)`, where the options may be a
+				// bare timeout. Only an object of focus and skip flags may follow the function.
+				const after = unwrap(second)?.type === 'ObjectExpression' ? [] : node.arguments.slice(2)
+				const flags = new Set(['only', 'skip', 'todo'])
+				const limited =
+					option(second, new Set(['retry', 'timeout'])) ||
+					after.some((argument) => {
+						const expression = unwrap(argument)
+						return (
+							expression?.type !== 'ObjectExpression' ||
+							expression.properties.some(
+								(property) =>
+									property.type !== 'Property' ||
+									!flags.has(keyName(property.key, property.computed) ?? ''),
+							)
+						)
+					})
+				if (limited) context.report({ node, message: TIMEOUT_MESSAGE })
+				const options = [second, third]
+				if (options.some((argument) => isOn(option(argument, new Set(['only']))))) {
 					context.report({ node, message: ONLY_MESSAGE })
-				} else if (isOn(option(second, new Set(['skip', 'todo'])))) skipped(node)
+				} else if (options.some((argument) => isOn(option(argument, new Set(['skip', 'todo']))))) {
+					skipped(node)
+				}
 			},
 			Identifier(node) {
 				const parent = node.parent
@@ -146,7 +157,7 @@ const noTestTimeoutOrUnquarantinedSkip = defineRule({
 				else if (SKIPPED_TESTS.has(node.name)) skipped(node)
 			},
 			MemberExpression(node) {
-				const property = keyName(node.property)
+				const property = keyName(node.property, node.computed)
 				const root = calleePath(node.object)?.[0]
 				if (!root || !TESTS.has(root)) return
 				if (property === 'only') context.report({ node, message: ONLY_MESSAGE })
@@ -198,7 +209,19 @@ const noWaitInTests = defineRule({
 			if (argument?.type === 'CallExpression') {
 				return calleePath(argument.callee)?.join('.') === 'Promise.resolve'
 			}
-			return argument?.type === 'NewExpression' && some(argument.arguments, isWait)
+			if (
+				argument?.type !== 'NewExpression' ||
+				calleePath(argument.callee)?.join('.') !== 'Promise'
+			) {
+				return false
+			}
+			// `new Promise(setImmediate)`, or an executor that schedules a timer.
+			const [executor] = argument.arguments
+			if (executor?.type === 'Identifier') return TIMERS.has(executor.name)
+			return (
+				(executor?.type === 'ArrowFunctionExpression' || executor?.type === 'FunctionExpression') &&
+				some(executor.body, isWait)
+			)
 		}
 
 		// A loop polls when something it reads, not a counter it advances, decides when it stops.
