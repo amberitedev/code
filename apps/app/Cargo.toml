@@ -19,6 +19,8 @@ bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 bytes = { workspace = true }
 chardetng = { workspace = true }
 chrono = { workspace = true }
+# Reaching a paired Core with no port forwarded (`cores`).
+connect = { workspace = true }
 contracts = { workspace = true, features = ["client", "server"] }
 dashmap = { workspace = true }
 data-url = { workspace = true }
@@ -69,7 +71,6 @@ tauri-plugin-window-state = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "sync", "time"] }
-tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { workspace = true, features = ["compat", "io", "rt"] }
 tracing = { workspace = true }
 tracing-error = { workspace = true }
@@ -86,8 +87,6 @@ workspace = true
 features = ["devtools", "macos-private-api", "unstable"]
 
 [dev-dependencies]
-rcgen = "0.14.7"
-rustls = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5.2", features = ["util"] }
 

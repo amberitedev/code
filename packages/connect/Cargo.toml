@@ -1,0 +1,29 @@
+[package]
+name = "connect"
+edition.workspace = true
+
+# Direct connections between Apps and Cores with no port forwarded: both sides learn each other's
+# addresses from the backend, send toward each other so their routers let the other in, and open
+# QUIC pinned to each other's certificate. Also which IPs are public, and TLS pinned to a Core.
+# It imports none of our crates.
+[dependencies]
+futures = { workspace = true }
+hex = { workspace = true }
+netdev = "0.46.3"
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rand = { workspace = true }
+rcgen = "0.14.7"
+ring = "0.17.14"
+# The ring backend avoids aws-lc-sys's CMake build on Windows.
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+sha2 = { workspace = true }
+# One socket for IPv6 and IPv4.
+socket2 = "0.6.5"
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+[lints]
+workspace = true

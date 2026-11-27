@@ -6,7 +6,8 @@
 //! transaction as the change, and [`run`] sends it, retrying with backoff until the backend
 //! answers. On every start and reconnect Core also reports its state, so a lost report cannot
 //! leave the two apart. When the backend says this Core was removed from its account, Core
-//! un-pairs and shows a new pairing code.
+//! un-pairs and shows a new pairing code. While it is connected Core also holds the link its
+//! owner's devices are introduced on (see `link`).
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -29,9 +30,9 @@ use sqlx::{SqliteConnection, SqlitePool};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use super::{Changed, CoreAccess, now, owed::OwedCall, pairing};
+use super::{Changed, CoreAccess, link, now, owed::OwedCall, pairing};
 use crate::{
-    network::{forward::Network, public_ip},
+    network::{connect::Connect, forward::Network, public_ip},
     storage::Storage,
 };
 
@@ -53,6 +54,8 @@ pub struct Sync {
     pub storage: Arc<Storage>,
     /// Told the join IP whenever the addresses are looked up.
     pub network: Arc<Network>,
+    /// Where introduced devices connect.
+    pub connect: Arc<Connect>,
     /// The engine's, which calls the backend with this Core's key.
     pub sessions: Sessions,
 }
@@ -179,7 +182,10 @@ pub async fn run(sync: Arc<Sync>) {
             Ok(()) => {
                 failures = 0;
                 info!("connected to the backend");
-                sync.serve_owed(&key, &addresses).await
+                tokio::select! {
+                    lost = sync.serve_owed(&key, &addresses) => lost,
+                    never = link::hold(&sync, &key) => match never {},
+                }
             }
             Err(lost) => lost,
         };
@@ -565,8 +571,17 @@ mod tests {
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let access = Arc::new(CoreAccess::new(db.clone(), keys));
+        let network = Arc::new(Network::off(db.clone()));
         Sync {
-            network: Arc::new(Network::off(db.clone())),
+            connect: Arc::new(
+                Connect::open(
+                    (Ipv4Addr::LOCALHOST, 0).into(),
+                    connect::Identity::generate().unwrap(),
+                    Arc::clone(&network),
+                )
+                .unwrap(),
+            ),
+            network,
             storage: Arc::new(Storage::new(
                 db.clone(),
                 crate::daemon::paths::Paths::new(dir.path()),

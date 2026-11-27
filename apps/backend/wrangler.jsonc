@@ -12,11 +12,13 @@
 		"bindings": [
 			{ "name": "FRIENDS", "class_name": "FriendsHub" },
 			{ "name": "CORE_SIGN_IN", "class_name": "CoreSignIn" },
+			{ "name": "CORE_LINK", "class_name": "CoreLink" },
 		],
 	},
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["FriendsHub"] },
 		{ "tag": "v2", "new_sqlite_classes": ["CoreSignIn"] },
+		{ "tag": "v3", "new_sqlite_classes": ["CoreLink"] },
 	],
 	"compatibility_flags": ["nodejs_compat"],
 	"r2_buckets": [{ "binding": "FILES", "bucket_name": "shared-files" }],

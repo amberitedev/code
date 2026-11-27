@@ -1,9 +1,10 @@
-//! HTTPS for the Core API with a certificate the Core makes itself, and the limits of the one
-//! listener the internet can reach.
+//! The certificate the Core makes itself, and HTTPS with it for the store.
 //!
-//! There is no domain and no certificate authority. The App learns the certificate's SHA-256
-//! fingerprint through the backend and trusts only that. There is no plain HTTP listener; the CLI
-//! reaches Core over the local socket (see `access::local`).
+//! There is no domain and no certificate authority. Everyone learns the certificate's SHA-256
+//! fingerprint through the backend and trusts only that. The App reaches the API over Connect
+//! (see `connect`) and the CLI over the local socket (see `access::local`), so this listener
+//! answers only `/store/` to other computers: the pool's Apps and Cores still fetch over HTTPS.
+//! This computer gets every route, which the dev fixtures use. There is no plain HTTP listener.
 
 use std::{net::IpAddr, path::Path, sync::Arc, time::Duration};
 
@@ -31,15 +32,17 @@ use tracing::debug;
 use crate::{access::Peer, daemon::paths::Paths};
 
 /// How long a new connection may take to finish the TLS handshake.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Open connections at once. More wait to be accepted.
-const MAX_CONNECTIONS: usize = 256;
+pub(super) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Open connections at once, on this listener and on Connect each.
+pub(super) const MAX_CONNECTIONS: usize = 256;
 
 /// This Core's certificate: self-signed, made once on first start and never renewed.
 pub struct Identity {
     config: Arc<ServerConfig>,
     /// SHA-256 of the certificate, lowercase hex. This is what the App pins.
     pub fingerprint: String,
+    /// The same certificate, for Connect.
+    pub connect: connect::Identity,
 }
 
 impl Identity {
@@ -70,6 +73,7 @@ impl Identity {
             (None, Some(_)) => return Err(half_identity(&cert_path)),
         };
         let fingerprint = hex::encode(Sha256::digest(&cert));
+        let connect = connect::Identity::new(cert.clone(), key.clone());
         let config = ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
@@ -86,6 +90,7 @@ impl Identity {
         Ok(Self {
             config: Arc::new(config),
             fingerprint,
+            connect,
         })
     }
 }
@@ -143,8 +148,17 @@ pub async fn serve(listener: TcpListener, router: Router, identity: &Identity) {
 }
 
 /// Refuse what only a browser or a DNS rebinding attack sends: an `Origin` header, or a `Host`
-/// that is a name instead of this Core's address. The App's Rust side sends neither.
+/// that is a name instead of this Core's address. Another computer gets the store and nothing
+/// else.
 async fn guard(request: Request, next: Next) -> Response {
+    let here = request
+        .extensions()
+        .get::<Peer>()
+        .is_none_or(|Peer(ip)| ip.to_canonical().is_loopback());
+    if !here && !request.uri().path().starts_with("/store/") {
+        return ApiError::new(ErrorCode::NotFound, "Not found.")
+            .into_response();
+    }
     if request.headers().contains_key(ORIGIN) {
         return ApiError::new(
             ErrorCode::Forbidden,
@@ -218,7 +232,25 @@ mod tests {
 
         let router = Router::new()
             .route("/", get(|| async { "ok" }))
+            .route("/store/{*rest}", get(|| async { "ok" }))
             .layer(middleware::from_fn(guard));
+        let from = |peer: &str, path: &str| {
+            let request = Request::builder()
+                .uri(path)
+                .header("host", "192.168.1.2:16662")
+                .extension(Peer(peer.parse().unwrap()))
+                .body(Body::empty())
+                .unwrap();
+            let router = router.clone();
+            async move { router.oneshot(request).await.unwrap().status().as_u16() }
+        };
+        // Another computer reaches the store over HTTPS and nothing else; the API is on Connect.
+        assert_eq!(from("203.0.113.5", "/").await, 404);
+        assert_eq!(from("192.168.1.9", "/").await, 404);
+        assert_eq!(from("203.0.113.5", "/store/v1/objects").await, 200);
+        assert_eq!(from("127.0.0.1", "/").await, 200);
+        assert_eq!(from("::ffff:127.0.0.1", "/").await, 200);
+
         let status = |headers: &[(&str, &str)]| {
             let mut request = Request::builder().uri("/");
             for (name, value) in headers {

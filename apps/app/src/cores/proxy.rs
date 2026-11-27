@@ -1,6 +1,7 @@
 //! The App's Core proxy: one HTTP/1.1 listener on 127.0.0.1 for every paired Core. A request to
 //! `/<secret>/core/<n>/<path>` goes on to `<path>` on the Core behind tunnel `n` (see
-//! `Cores::connect`) over pinned TLS, signed with this device's session there.
+//! `Cores::connect`) over its connection, signed with this device's session there. While there is
+//! no connection the answer is `core_offline`, and nothing was sent.
 //!
 //! The WebView's own `Authorization` is dropped, so the account session can never reach a Core,
 //! and the session token is added here, so the WebView never holds it. Console sockets are
@@ -42,7 +43,10 @@ use hyper::{
 use hyper_util::rt::TokioIo;
 use tokio::{io::copy_bidirectional, net::TcpListener, sync::Mutex};
 
-use super::{Cores, Tunnel};
+use super::{
+    Cores,
+    tunnel::{Tunnel, Unanswered},
+};
 use crate::local_api::guard::{self, Guard};
 
 /// Set to print the head of every request the proxy sends to a Core, with the session token left
@@ -169,9 +173,15 @@ async fn pass_on(
     } else {
         forward(&tunnel, n, upstream, request).await
     };
-    sent.unwrap_or_else(|problem| {
-        tracing::debug!(%problem, "a Core did not answer");
-        error(ErrorCode::NetworkError, "The Core did not answer.")
+    sent.unwrap_or_else(|unanswered| match unanswered {
+        Unanswered::Offline => error(
+            ErrorCode::CoreOffline,
+            "This Core is not connected right now.",
+        ),
+        Unanswered::Lost(problem) => {
+            tracing::debug!(%problem, "a Core did not answer");
+            error(ErrorCode::NetworkError, "The Core did not answer.")
+        }
     })
 }
 
@@ -191,34 +201,32 @@ fn on_core(uri: &Uri) -> Option<(usize, Uri)> {
     Some((n.parse().ok()?, Uri::try_from(path_and_query).ok()?))
 }
 
-/// Send a request on this local connection's connection to the tunnel's Core, opening it first if
-/// there is none or it closed. A request the closed connection never sent goes on a new one.
+/// Send a request on this local connection's stream to the tunnel's Core, opening it first if
+/// there is none or it closed. A request the closed stream never sent goes on a new one.
 async fn forward(
     tunnel: &Tunnel,
     n: usize,
     upstream: &Upstream,
     request: Request<Incoming>,
-) -> Result<Response, String> {
+) -> Result<Response, Unanswered> {
+    let lost = |error: hyper::Error| Unanswered::Lost(error.to_string());
     let mut held = upstream.lock().await;
     let ready = match held.get_mut(&n) {
         Some(sender) => sender.ready().await.is_ok(),
         None => false,
     };
     if !ready {
-        held.insert(n, tunnel.target.open().await?);
+        held.insert(n, tunnel.open().await?);
     }
     let sender = held.get_mut(&n).expect("opened above");
     let response = match sender.try_send_request(request).await {
         Ok(response) => response,
         Err(mut failed) => {
             let Some(request) = failed.take_message() else {
-                return Err(failed.into_error().to_string());
+                return Err(lost(failed.into_error()));
             };
-            let mut sender = tunnel.target.open().await?;
-            let response = sender
-                .send_request(request)
-                .await
-                .map_err(|error| error.to_string())?;
+            let mut sender = tunnel.open().await?;
+            let response = sender.send_request(request).await.map_err(lost)?;
             held.insert(n, sender);
             response
         }
@@ -226,18 +234,18 @@ async fn forward(
     Ok(response.map(Body::new))
 }
 
-/// Send an upgrade, such as the console socket, on a connection of its own, and once the Core
+/// Send an upgrade, such as the console socket, on a stream of its own, and once the Core
 /// switches protocols, join the two ends.
 async fn upgrade(
     tunnel: &Tunnel,
     mut request: Request<Incoming>,
-) -> Result<Response, String> {
+) -> Result<Response, Unanswered> {
     let local = hyper::upgrade::on(&mut request);
-    let mut sender = tunnel.target.open().await?;
+    let mut sender = tunnel.open().await?;
     let mut response = sender
         .send_request(request)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| Unanswered::Lost(error.to_string()))?;
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
         let remote = hyper::upgrade::on(&mut response);
         tokio::spawn(async move {

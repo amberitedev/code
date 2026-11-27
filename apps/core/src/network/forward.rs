@@ -1,8 +1,8 @@
 //! Port mappings that belong to servers, and how reachable each port is.
 //!
-//! Core asks the router to forward its API port, and each running server's game port. A server's
-//! mapping goes when the server stops, never when Core exits: servers outlive Core, and a mapping
-//! lasts its lease (an hour) by itself. Mappings are kept in the database, so a Core that
+//! Core asks the router to forward its own port, on TCP for the store and on UDP for Connect, and
+//! each running server's game port. A server's mapping goes when the server stops, never when
+//! Core exits: servers outlive Core, and a mapping lasts its lease (an hour) by itself. Mappings are kept in the database, so a Core that
 //! restarts renews the ones it had instead of asking for new ones.
 //!
 //! Every few minutes Core reconciles: it forwards what should be forwarded and is not, looking for
@@ -26,15 +26,19 @@ use super::{
     diagnosis::{Diagnosis, Facts, Outside, RouterFacts, diagnose},
     firewall::Firewall,
     is_private, public_ip,
-    router::{self, Mapping, Router},
+    router::{self, Mapping, Router, Transport},
 };
 use crate::{
     access::now,
     servers::{Lifecycle, Servers, server_rows},
 };
 
-/// The key of Core's own API mapping and report.
+/// The key of Core's own TCP mapping and report.
 pub const CORE: &str = "core";
+/// The key of the UDP mapping of Core's port, which Connect listens on. It has no report: nothing
+/// here can test a UDP port, and an introduction offers it next to the addresses that need no
+/// router.
+const CONNECT: &str = "connect";
 const RENEW_EVERY: Duration = Duration::from_secs(20 * 60);
 /// How often Core forwards what is not forwarded yet, and drops what is no longer running.
 const RECONCILE_EVERY: Duration = Duration::from_secs(5 * 60);
@@ -68,6 +72,8 @@ pub struct Network {
     /// Where players join this Core's servers: its public address, or its own network's when it
     /// has none. Backend sync keeps it current (`access::sync`).
     join_ip: std::sync::Mutex<Option<IpAddr>>,
+    /// The outside port the router forwards to Connect, while it does.
+    connect_port: std::sync::Mutex<Option<u16>>,
 }
 
 #[derive(Default)]
@@ -132,6 +138,7 @@ impl Network {
             routing: tokio::sync::Mutex::default(),
             reports: std::sync::Mutex::default(),
             join_ip: std::sync::Mutex::default(),
+            connect_port: std::sync::Mutex::default(),
         }
     }
 
@@ -154,6 +161,31 @@ impl Network {
 
     pub fn set_join_ip(&self, ip: IpAddr) {
         *self.join_ip.lock().expect("not poisoned") = Some(ip);
+    }
+
+    /// The port on the router's internet side that reaches Connect, when the router forwards
+    /// one.
+    pub fn connect_port(&self) -> Option<u16> {
+        *self.connect_port.lock().expect("not poisoned")
+    }
+
+    /// Ask the router to forward Connect's UDP port, or renew that.
+    async fn forward_connect(&self) {
+        let Some(local) =
+            public_ip::local_ipv4().filter(|ip| is_private(IpAddr::V4(*ip)))
+        else {
+            return;
+        };
+        let granted = match self
+            .forward(CONNECT, local, self.api_port, Transport::Udp, &|| true)
+            .await
+        {
+            Some(RouterFacts::Found {
+                mapping: Ok(port), ..
+            }) => Some(port),
+            _ => None,
+        };
+        *self.connect_port.lock().expect("not poisoned") = granted;
     }
 
     /// Forward and check Core's API and every running server, then follow servers starting
@@ -211,16 +243,20 @@ impl Network {
             .cloned()
             .collect();
         for key in pending.iter().chain(&reported) {
-            if key != CORE && !running.contains(key) {
+            if key != CORE && key != CONNECT && !running.contains(key) {
                 self.close(key).await;
             }
         }
         if all || !mapped.contains(CORE) {
             let me = Arc::clone(self);
             tokio::spawn(async move {
-                me.open(CORE, "Core's API".into(), me.api_port, &|| true)
+                me.open(CORE, "Core's store".into(), me.api_port, &|| true)
                     .await;
             });
+        }
+        if all || !mapped.contains(CONNECT) {
+            let me = Arc::clone(self);
+            tokio::spawn(async move { me.forward_connect().await });
         }
         for id in running {
             if all || !mapped.contains(&id) {
@@ -272,10 +308,13 @@ impl Network {
                 gateway: router::default_gateway(),
             },
             Some(ip) if !is_private(IpAddr::V4(ip)) => RouterFacts::NoNat,
-            Some(ip) => match self.forward(key, ip, port, current).await {
-                Some(router) => router,
-                None => return,
-            },
+            Some(ip) => {
+                match self.forward(key, ip, port, Transport::Tcp, current).await
+                {
+                    Some(router) => router,
+                    None => return,
+                }
+            }
         };
         let listening = listening(port).await;
         let facts = Facts {
@@ -322,6 +361,7 @@ impl Network {
         key: &str,
         local: Ipv4Addr,
         port: u16,
+        transport: Transport,
         current: Current<'_>,
     ) -> Option<RouterFacts> {
         let mut routing = self.routing.lock().await;
@@ -352,9 +392,9 @@ impl Network {
                 Err(error) if router.serves(&mapping) => {
                     (Err(error), Some(mapping))
                 }
-                Err(_) => (router.map(port, port).await, None),
+                Err(_) => (router.map(port, port, transport).await, None),
             },
-            None => (router.map(port, port).await, None),
+            None => (router.map(port, port, transport).await, None),
         };
         let granted = result
             .as_ref()
@@ -552,7 +592,7 @@ mod tests {
     async fn a_mapping_only_the_router_can_remove_waits_for_it() {
         let db = db::memory().await;
         let mapping: Mapping = serde_json::from_str(
-            r#"{"internal":25565,"external":25565,"via":{"protocol":"upnp"}}"#,
+            r#"{"internal":25565,"external":25565,"transport":"tcp","via":{"protocol":"upnp"}}"#,
         )
         .unwrap();
         save(&db, "server", &mapping).await;

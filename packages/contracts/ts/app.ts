@@ -2,7 +2,7 @@
 // Regenerate: WRITE_TS=1 node scripts/dev-runner.ts test amberite-app
 
 import type { ApiError, ModLoader, Endpoint } from './protocol'
-import type { SharedIconConfig, UserFriend, UserStatus } from './backend'
+import type { Dialer, SharedIconConfig, UserFriend, UserStatus } from './backend'
 import type { CoreSession } from './core'
 import type { EngineEvent, InstallJobSnapshot, ImportLauncherType, InstanceLink, InstanceSyncedOptions, MemorySettings, WindowSize, Hooks, World, WorldWithInstance, DesyncServerMode, ProcessMetadata, JavaVersion, ProjectType, CachedSharedInstanceSummary } from './engine'
 
@@ -22,9 +22,34 @@ backend_url: string | null, };
 
 export type Platform = "windows" | "macos" | "linux";
 
-export type CoreTarget = { core_id: string, account: string, address: string, fingerprint: string, };
+export type CoreTarget = { core_id: string, account: string, 
+/**
+ * The SHA-256 of the Core's certificate.
+ */
+fingerprint: string, 
+/**
+ * Where the Core is on its own network, `https://ip:port`.
+ */
+address: string, 
+/**
+ * Where the backend's introduction says the Core is.
+ */
+introduced: Array<string> | null, };
 
-export type NewCoreSession = { core_id: string, account: string, address: string, fingerprint: string, ticket: string, };
+export type CoreRoute = { 
+/**
+ * Requests to the Core go here. They are answered `core_offline` while it is not reached.
+ */
+base: string, reached: Reached | null, 
+/**
+ * This device, for the backend to introduce to the Core. Set when the Core was not reached
+ * and no introduction was given.
+ */
+dialer: Dialer | null, };
+
+export type Reached = "local" | "internet";
+
+export type NewCoreSession = { core_id: string, account: string, fingerprint: string, ticket: string, };
 
 export type CoreSessionKey = { core_id: string, account: string, };
 
@@ -510,7 +535,7 @@ export const boot = {
 }
 
 export const pairedCores = {
-	connectCore: { method: "POST", path: "/app/cores/connect", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, CoreTarget, string>,
+	connectCore: { method: "POST", path: "/app/cores/connect", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, CoreTarget, CoreRoute>,
 	signInToCore: { method: "POST", path: "/app/cores/sessions", auth: "none", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewCoreSession, CoreSession>,
 	signOutOfCore: { method: "DELETE", path: "/app/cores/sessions", auth: "none", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, CoreSessionKey, void, void>,
 	checkCoreSession: { method: "GET", path: "/app/cores/sessions", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, CoreSessionKey, void, boolean>,

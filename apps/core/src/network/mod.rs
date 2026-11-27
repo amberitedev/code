@@ -1,6 +1,7 @@
-//! Reaching Core and its servers from outside: TLS for the API, port mappings that belong to
-//! servers (`forward`), and the reachability diagnosis.
+//! Reaching Core and its servers from outside: Connect for the API, TLS for the store, port
+//! mappings (`forward`), and the reachability diagnosis.
 
+pub mod connect;
 pub mod diagnosis;
 pub mod firewall;
 pub mod forward;

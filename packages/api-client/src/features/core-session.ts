@@ -1,4 +1,4 @@
-import { type Endpoint, PROTOCOL_VERSION } from '@amberite/contracts/protocol'
+import { type Endpoint, type ErrorCode, PROTOCOL_VERSION } from '@amberite/contracts/protocol'
 import { core as coreRoutes, type Health, TICKET_HEADER } from '@amberite/contracts/core'
 
 import { ContractClient, type ContractTransport, fetchWithProgress } from '../contracts/client'
@@ -12,7 +12,9 @@ const CORE_TIMEOUT_MS = 35_000
  * How `client.core(id)` reaches a listed Core by default: at the base `cores` routes it
  * to, where the platform adds this device's session. A dangerous call carries a fresh ticket, and
  * a call the Core answers with 401 `invalid_credentials` signs in once and is sent again; the
- * Core checks the session before the ticket, so the ticket is still unused.
+ * Core checks the session before the ticket, so the ticket is still unused. A call the platform
+ * answers with `core_offline` never left this computer: the Core is connected to again and the
+ * call sent once more.
  */
 export function coreSessionTransport(
 	client: AbstractModrinthClient,
@@ -33,23 +35,24 @@ export function coreSessionTransport(
 			// Only the page's own XMLHttpRequest reports an upload's progress.
 			const send = () =>
 				init.onUploadProgress ? fetchWithProgress(input, init) : fetch(input, init)
-			const response = await send()
-			if (!(await answeredSignedOut(response))) return response
+			let response = await send()
+			if ((await answered(response, 503, 'core_offline')) && (await cores.reconnect(coreId)))
+				response = await send()
+			if (!(await answered(response, 401, 'invalid_credentials'))) return response
 			await cores.signIn(await cores.core(coreId))
 			return send()
 		},
 	}
 }
 
-async function answeredSignedOut(response: Response): Promise<boolean> {
-	if (response.status !== 401) return false
+/** Whether `response` is the error `code` with `status`. */
+async function answered(response: Response, status: number, code: ErrorCode): Promise<boolean> {
+	if (response.status !== status) return false
 	const body: unknown = await response
 		.clone()
 		.json()
 		.catch(() => undefined)
-	return typeof body === 'object' && body !== null && 'error' in body
-		? body.error === 'invalid_credentials'
-		: false
+	return typeof body === 'object' && body !== null && 'error' in body ? body.error === code : false
 }
 
 /** Every protocol version keeps these, so an outdated Core can still be checked and updated. */

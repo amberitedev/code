@@ -40,6 +40,8 @@ pub enum ErrorCode {
     CodeExpired,
     ConfigurationError,
     CoreRemoved,
+    /// The Core holds no link to the backend, so nobody can be introduced to it.
+    CoreOffline,
     DuplicateEmail,
     InvalidAddress,
     MailError,
@@ -242,6 +244,7 @@ impl ErrorCode {
             | Self::MinecraftAuthNetwork
             | Self::MinecraftAuthError => 502,
             Self::ConfigurationError
+            | Self::CoreOffline
             | Self::MailError
             | Self::NoStorage
             | Self::TicketsUnavailable
