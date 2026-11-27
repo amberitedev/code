@@ -169,24 +169,33 @@ describe('dev runner stack', () => {
 		expect(() => parseInput(['--held', 'default'])).toThrow('takes no fixture')
 	})
 
-	it('keeps each App at its local address across starts', async () => {
+	it('keeps each App at its local address across starts, by name', async () => {
 		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const file = NodePath.join(scratch, 'local-api.json')
 		const taken = NodeNet.createServer()
 		try {
-			const first = await appLocalAddresses(scratch, 2)
-			expect(new Set(first.map(({ port }) => port)).size).toBe(2)
-			// A stack with one more App keeps the first two.
-			const second = await appLocalAddresses(scratch, 3)
-			expect(second.slice(0, 2)).toEqual(first)
-			// One with fewer leaves the rest kept for later.
-			await appLocalAddresses(scratch, 1)
-			expect(await appLocalAddresses(scratch, 3)).toEqual(second)
+			const [alice, bob] = await appLocalAddresses(scratch, ['alice', 'bob'])
+			expect(alice!.port).not.toBe(bob!.port)
+			// Another stack, with the Apps in another order and one more, keeps each name's address.
+			const [carol, bob2, alice2] = await appLocalAddresses(scratch, ['carol', 'bob', 'alice'])
+			expect([bob2, alice2]).toEqual([bob, alice])
+			expect([alice!.port, bob!.port]).not.toContain(carol!.port)
+			// Unusable entries are replaced: a bad port, two Apps on one port, an empty secret.
+			const kept = JSON.parse(NodeFS.readFileSync(file, 'utf8'))
+			kept.alice = { port: 0, secret: alice!.secret }
+			kept.bob = { port: carol!.port, secret: '' }
+			NodeFS.writeFileSync(file, JSON.stringify(kept))
+			const fixed = await appLocalAddresses(scratch, ['carol', 'bob', 'alice'])
+			expect(fixed[0]).toEqual(carol)
+			expect(fixed[1]!.port).not.toBe(carol!.port)
+			expect(fixed[1]!.secret).toMatch(/^[0-9a-f]{64}$/)
+			expect(fixed[2]!.port).toBeGreaterThan(0)
+			expect(fixed[2]!.secret).toBe(alice!.secret)
 			// A kept port something else holds is replaced; the secret stays.
-			await new Promise<void>((resolve) => taken.listen(second[1]!.port, '127.0.0.1', resolve))
-			const moved = await appLocalAddresses(scratch, 3)
-			expect(moved[1]!.port).not.toBe(second[1]!.port)
-			expect(moved[1]!.secret).toBe(second[1]!.secret)
-			expect([moved[0], moved[2]]).toEqual([second[0], second[2]])
+			await new Promise<void>((resolve) => taken.listen(fixed[0]!.port, '127.0.0.1', resolve))
+			const [moved] = await appLocalAddresses(scratch, ['carol'])
+			expect(moved!.port).not.toBe(fixed[0]!.port)
+			expect(moved!.secret).toBe(carol!.secret)
 		} finally {
 			taken.close()
 			NodeFS.rmSync(scratch, { force: true, recursive: true })

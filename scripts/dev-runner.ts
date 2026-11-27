@@ -128,7 +128,7 @@ export type ProcessSpec = {
 	readonly env: NodeJS.ProcessEnv
 	readonly label: string
 }
-/** Where a dev App serves its local API. Picked once per runner, so `rs` keeps it. */
+/** Where a dev App serves its local API. See [`appLocalAddresses`]. */
 export type LocalAddress = {
 	readonly port: number
 	readonly secret: string
@@ -186,6 +186,9 @@ export class DevRunnerError extends Error {
 		this.name = 'DevRunnerError'
 	}
 }
+
+/** The stack is still starting when a wait gives up: slow, such as a cold build, not failed. */
+class StillStarting extends DevRunnerError {}
 
 export function isBrowserAllowedPort(port: number): boolean {
 	return !FETCH_BAD_PORTS.has(port)
@@ -294,42 +297,59 @@ async function pickFreePorts(count: number): Promise<ReadonlyArray<number>> {
 }
 
 /**
- * Each App's local address, kept in `.data/local-api.json` by the App's place in the stack, so its
- * tab URL stays the same across restarts and fixtures. A kept port that is taken is replaced.
+ * Each App's local address, kept in `.data/local-api.json` by the App's name, which its tab URL
+ * carries, so the URL stays the same across restarts and fixtures. A kept port that is taken or
+ * unusable is replaced, and so is an unusable secret.
  */
 export async function appLocalAddresses(
 	data: string,
-	count: number,
+	names: ReadonlyArray<string>,
 ): Promise<ReadonlyArray<LocalAddress>> {
 	const file = NodePath.join(data, 'local-api.json')
-	let kept: ReadonlyArray<unknown> = []
+	let kept: Record<string, unknown> = {}
 	try {
 		const value: unknown = JSON.parse(NodeFS.readFileSync(file, 'utf8'))
-		if (Array.isArray(value)) kept = value
+		if (isRecord(value)) kept = value
 	} catch {
 		// None kept yet.
 	}
-	const keptAt = (index: number) => {
-		const entry = kept[index]
+	const keptFor = (name: string) => {
+		const entry = kept[name]
+		if (!isRecord(entry)) return {}
+		const { port, secret } = entry
 		return {
-			port: isRecord(entry) && typeof entry.port === 'number' ? entry.port : undefined,
-			secret: isRecord(entry) && typeof entry.secret === 'string' ? entry.secret : undefined,
+			port:
+				typeof port === 'number' &&
+				Number.isInteger(port) &&
+				port > 0 &&
+				port <= MAX_PORT &&
+				isBrowserAllowedPort(port)
+					? port
+					: undefined,
+			secret: typeof secret === 'string' && /^[0-9a-f]{64}$/.test(secret) ? secret : undefined,
 		}
 	}
-	const usable = await Promise.all(
-		Array.from({ length: count }, async (_, index) => {
-			const { port } = keptAt(index)
-			return port !== undefined && (await canListen(port, '127.0.0.1')) ? port : undefined
+	const ports = await Promise.all(
+		names.map(async (name, index) => {
+			const { port } = keptFor(name)
+			// Two Apps kept with one port: the later one gets a new port.
+			const twice = names.slice(0, index).some((other) => keptFor(other).port === port)
+			return port !== undefined && !twice && (await canListen(port, '127.0.0.1')) ? port : undefined
 		}),
 	)
-	const taken = new Set(kept.map((_, index) => keptAt(index).port))
-	const fresh = (await pickFreePorts(count + taken.size)).filter((port) => !taken.has(port))
-	const addresses = usable.map((port, index) => ({
-		port: port ?? fresh.pop()!,
-		secret: keptAt(index).secret ?? NodeCrypto.randomBytes(32).toString('hex'),
+	const missing = ports.filter((port) => port === undefined).length
+	const taken = new Set(Object.keys(kept).map((name) => keptFor(name).port))
+	const fresh =
+		missing === 0
+			? []
+			: (await pickFreePorts(missing + taken.size)).filter((port) => !taken.has(port))
+	const addresses = names.map((name, index) => ({
+		port: ports[index] ?? fresh.pop()!,
+		secret: keptFor(name).secret ?? NodeCrypto.randomBytes(32).toString('hex'),
 	}))
 	NodeFS.mkdirSync(data, { recursive: true })
-	NodeFS.writeFileSync(file, JSON.stringify([...addresses, ...kept.slice(count)]), { mode: 0o600 })
+	const updated = { ...kept, ...Object.fromEntries(names.map((name, i) => [name, addresses[i]])) }
+	NodeFS.writeFileSync(file, JSON.stringify(updated), { mode: 0o600 })
 	return addresses
 }
 
@@ -373,6 +393,10 @@ async function main(): Promise<void> {
 	}
 	if (command === 'down') return down(paths)
 	if (command === 'status') {
+		if (commandArgs.some((arg) => arg !== '--wait')) {
+			throw new DevRunnerError('status takes only --wait.')
+		}
+		if (commandArgs.includes('--wait')) await waitUntilReady(paths)
 		if (!(await printStatus(paths))) process.exitCode = 1
 		return
 	}
@@ -386,7 +410,7 @@ async function main(): Promise<void> {
 		)
 	}
 	const input = parseInput(commandArgs)
-	const live = readLiveRuntime(paths)
+	const live = readRunner(paths)
 	if (live) {
 		throw new DevRunnerError(
 			`Already running as PID ${live.pid}. Apply a fixture to it with vp run fixture <name>, or stop it with vp run down.`,
@@ -433,17 +457,20 @@ async function main(): Promise<void> {
 			app: `http://localhost:${ports.app}`,
 		},
 	}
-	writeRuntimeFile(paths, runtime)
+	/** Once stopping, only `stop` writes the file, so nothing left queued records a live stack. */
+	const save = () => {
+		if (!stopping) writeRuntimeFile(paths, runtime)
+	}
 	const setBuildFailed = (label: string, failed: boolean) => {
 		if ((runtime.buildFailed === label) === failed) return
 		runtime.buildFailed = failed ? label : undefined
-		writeRuntimeFile(paths, runtime)
+		save()
 	}
 	const setState = (label: string, state: ProgramState | undefined) => {
 		if (runtime.programs[label] === state) return
 		if (state) runtime.programs[label] = state
 		else delete runtime.programs[label]
-		writeRuntimeFile(paths, runtime)
+		save()
 	}
 	const specsByLabel = new Map(shared.map((spec) => [spec.label, spec]))
 	for (const spec of shared) runtime.programs[spec.label] = 'stopped'
@@ -471,6 +498,7 @@ async function main(): Promise<void> {
 	}
 	/** `ready`, when given, is awaited after the build and before the program runs: false skips it. */
 	const start = async (spec: ProcessSpec, ready?: Promise<boolean>) => {
+		if (stopping) return
 		const token = Symbol(spec.label)
 		starts.set(spec.label, token)
 		setState(spec.label, 'starting')
@@ -542,6 +570,7 @@ async function main(): Promise<void> {
 	/** Resolves once the old process is gone, with `started` for when the new one is up or has failed. */
 	const restart = async (label: string) => {
 		const spec = specsByLabel.get(label)
+		if (stopping) return undefined
 		if (!spec) {
 			runnerLog(
 				'warning',
@@ -550,6 +579,7 @@ async function main(): Promise<void> {
 			return undefined
 		}
 		await stopProgram(label)
+		if (stopping) return undefined
 		restartFailures.delete(label)
 		runnerLog('info', `Starting ${label}...`)
 		// Not waited for: a Rust program may build first, and the next command should not queue behind it.
@@ -602,13 +632,18 @@ async function main(): Promise<void> {
 	/** Starts the Apps and Cores `shape` names, replacing the ones that ran before. */
 	const startStack = async (shape: StackShape) => {
 		await halt()
+		if (stopping) return
 		for (const label of [...specsByLabel.keys()].filter(isStackLabel)) {
 			specsByLabel.delete(label)
 			setState(label, undefined)
 		}
-		const appAddresses = await appLocalAddresses(paths.data, shape.apps.length)
+		const appAddresses = await appLocalAddresses(
+			paths.data,
+			shape.apps.map(({ name }) => name),
+		)
 		const corePorts =
 			shape.cores === 0 ? [] : [ports.core, ...(await pickFreePorts(shape.cores - 1))]
+		if (stopping) return
 		const stack = createStackSpecs({
 			appAddresses,
 			branch,
@@ -639,9 +674,10 @@ async function main(): Promise<void> {
 		for (const { dataDir } of [...runtime.apps, ...runtime.cores]) {
 			NodeFS.mkdirSync(dataDir, { recursive: true })
 		}
-		writeRuntimeFile(paths, runtime)
+		save()
 		const backend = specsByLabel.get('backend')
 		if (backend) await startProgram(backend)
+		if (stopping) return
 		// An App signs in once as it starts and a Core asks for its pairing code as it starts, so the
 		// backend has to answer before either runs; their build goes on meanwhile. Not waited for
 		// here: commands run one at a time, and `rs backend` is how a backend that will not start
@@ -677,7 +713,7 @@ async function main(): Promise<void> {
 			const kept = Object.entries(runtime.requests).slice(1 - ANSWERED_REQUESTS)
 			const state = runtime.programs[labelFor(name)] ?? 'unknown'
 			runtime.requests = Object.fromEntries([...kept, [request, state]])
-			writeRuntimeFile(paths, runtime)
+			save()
 		},
 		commandFile: NodePath.join(paths.data, 'dev-commands'),
 		getCore: () => processes.get('core:1'),
@@ -698,22 +734,38 @@ async function main(): Promise<void> {
 			runnerLog('info', `${label} stopped. Use rs ${label} to start it again.`)
 		},
 	})
+	// Only now: the command input empties the command file, which would erase a command sent sooner.
+	writeRuntimeFile(paths, runtime)
 
 	process.once('SIGINT', () => void stop(130))
 	process.once('SIGTERM', () => void stop(143))
+	process.once('SIGHUP', () => void stop(129))
 
+	const begun = performance.now()
+	/** Stops the stack, saying why it can never become ready. */
+	const fail = (reason: string) => {
+		if (stopping) return
+		runnerLog('error', reason)
+		void stop(1)
+	}
 	/** Prints where to reach the stack once it is ready. A fixture prints it when it is applied. */
 	const announceReady = async () => {
-		const begun = performance.now()
-		try {
-			while (!stopping && !(await runtimeIsReady(runtime))) {
-				await new Promise((resolve) => setTimeout(resolve, 500))
+		let shown: string | undefined
+		for (;;) {
+			if (stopping) return
+			const failed =
+				runtime.buildFailed ??
+				Object.keys(runtime.programs).find((label) => runtime.programs[label] === 'failed')
+			if (failed) return fail(`${failed} did not start, so the stack cannot become ready.`)
+			try {
+				if (await runtimeIsReady(runtime)) break
+			} catch (error) {
+				if (!(error instanceof PageError)) throw error
+				// The frontend picks up a fix by itself.
+				if (error.message !== shown) runnerLog('error', (shown = error.message))
 			}
-		} catch (error) {
-			runnerLog('error', error instanceof Error ? error.message : String(error))
-			return
+			await new Promise((resolve) => setTimeout(resolve, 500))
 		}
-		if (stopping) return
 		recordTiming(paths.primary, {
 			kind: 'dev',
 			worktree: paths.worktree,
@@ -725,12 +777,18 @@ async function main(): Promise<void> {
 
 	try {
 		for (const spec of shared) if (spec.label !== 'backend') void startProgram(spec)
-		if (started) {
+		// A fixture waits nine minutes for a program, which a cold build outlasts, so build first.
+		if ((await runFromRunner(paths, ['build'], builds)) !== 0) {
+			fail('The App and Core did not build. Fix the error above and start dev again.')
+		} else if (started) {
 			void startStack(started)
-			void announceReady()
+				.then(announceReady)
+				.catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)))
 		} else {
 			runnerLog('info', 'Backend, Cores and Apps wait for a fixture.')
-			if (fixture) applyFixtureFromRunner(paths, fixture, builds)
+			if (fixture && (await runFromRunner(paths, ['fixture', fixture], builds)) !== 0) {
+				fail(`The ${fixture} fixture did not apply, so the stack cannot become ready.`)
+			}
 		}
 		await finished
 	} finally {
@@ -738,22 +796,31 @@ async function main(): Promise<void> {
 	}
 }
 
-/** Applies a fixture to this runner's stack from a child process, as `vp run fixture` would. */
-function applyFixtureFromRunner(
+/**
+ * Runs another command of this runner, such as `build` or `fixture <name>`, as a person would.
+ * Resolves with its exit code; the runner stops it when the runner stops.
+ */
+function runFromRunner(
 	paths: WorktreePaths,
-	fixture: string,
+	args: ReadonlyArray<string>,
 	children: Set<NodeChildProcess.ChildProcess>,
-): void {
+): Promise<number> {
 	const child = NodeChildProcess.spawn(
 		process.execPath,
-		[NodeURL.fileURLToPath(import.meta.url), 'fixture', fixture],
+		[NodeURL.fileURLToPath(import.meta.url), ...args],
 		{ cwd: paths.worktree, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
 	)
 	// Through this process's own output, so the dev log has it too.
 	child.stdout.on('data', (chunk: Buffer) => process.stdout.write(chunk))
 	child.stderr.on('data', (chunk: Buffer) => process.stderr.write(chunk))
 	children.add(child)
-	child.once('close', () => children.delete(child))
+	return new Promise((resolve) => {
+		child.once('error', () => resolve(1))
+		child.once('close', (code) => {
+			children.delete(child)
+			resolve(code ?? 1)
+		})
+	})
 }
 
 /** `dev [fixture] [--hide-windows]`, plus `--held` for a command that seeds the stack itself. */
@@ -817,7 +884,7 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 
 /**
  * `build`: compiles the App and Core for this checkout's current Rust without starting anything,
- * so a later `dev` finds them ready. Worktree setup runs it in the background.
+ * so a later `dev` finds them ready. `dev` runs it before it starts the Cores and Apps.
  */
 async function buildPrograms(paths: WorktreePaths): Promise<void> {
 	const ports = portsForOffset(0)
@@ -866,7 +933,8 @@ async function generateTypeScript(
 ): Promise<void> {
 	if (args.some((arg) => arg !== '--check')) throw new DevRunnerError('gen-ts takes only --check.')
 	const check = args.includes('--check')
-	const env = { ...process.env, SQLX_OFFLINE: 'true', ...(check ? {} : { WRITE_TS: '1' }) }
+	const { WRITE_TS: _, ...shell } = process.env
+	const env = { ...shell, SQLX_OFFLINE: 'true', ...(check ? {} : { WRITE_TS: '1' }) }
 	for (const crate of ['contracts', 'engine', 'amberite-app']) {
 		const build = testBuild(paths, readSharedEnv(paths), [crate])
 		if (!(await runTests(paths, env, [crate], build, ['ts_is_up_to_date']))) {
@@ -1793,11 +1861,11 @@ function pipeOutput(
 }
 
 /**
- * Commands come from stdin and from `.data/dev-commands`: a runner started detached (by an agent,
- * or from another terminal) has no usable stdin, so appending a line to that file is the way to
- * send it `rs core:1`, `stop backend`, or `quit`. The file is emptied when the runner starts.
- * `halt` and `stack` are how a fixture swaps the data: stop what holds it, then start the stack
- * file it wrote.
+ * Commands come from stdin and from `.data/dev-commands`: another terminal, or an agent whose
+ * background task holds the runner, cannot type into its stdin, so appending a line to that file
+ * is the way to send it `rs core:1`, `stop backend`, or `quit`. The file is emptied when the
+ * runner starts. `halt` and `stack` are how a fixture swaps the data: stop what holds it, then
+ * start the stack file it wrote.
  *
  * A `stop` or `rs` may end in `#<id>`. `answered` is called with that id once that very request
  * has finished, which is how its sender tells it from an earlier state or another restart.
@@ -2109,6 +2177,15 @@ function readLiveRuntime(paths: WorktreePaths): RuntimeFile | undefined {
 	return runtime.pid && processIsRunning(runtime.pid) ? runtime : undefined
 }
 
+/**
+ * The live runtime file, once its PID is checked to be a dev runner: a runner killed outright
+ * leaves its PID behind, and Windows hands PIDs out again. The check is slow, so ask it once.
+ */
+function readRunner(paths: WorktreePaths): RuntimeFile | undefined {
+	const runtime = readLiveRuntime(paths)
+	return runtime?.pid && processIsDevRunner(runtime.pid) ? runtime : undefined
+}
+
 function processIsRunning(pid: number): boolean {
 	try {
 		process.kill(pid, 0)
@@ -2237,7 +2314,7 @@ function portIsOpen(port: number): Promise<boolean> {
 
 /** Prints what is running and where. Returns whether everything is ready to use. */
 async function printStatus(paths: WorktreePaths): Promise<boolean> {
-	const runtime = readLiveRuntime(paths)
+	const runtime = readRunner(paths)
 	if (!runtime) {
 		runnerLog('info', NOT_RUNNING)
 		return false
@@ -2270,6 +2347,55 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	return ready
 }
 
+/** `status --wait`: waits until the stack that is starting is ready, or says why it is not. */
+async function waitUntilReady(paths: WorktreePaths): Promise<void> {
+	// A `dev` started a moment ago has not written its runtime file yet.
+	const deadline = Date.now() + 30_000
+	while (!readLiveRuntime(paths)) {
+		if (Date.now() > deadline) throw new DevRunnerError(NOT_RUNNING)
+		await new Promise((resolve) => setTimeout(resolve, 500))
+	}
+	try {
+		await connectStack(paths).ready()
+	} catch (error) {
+		if (!(error instanceof StillStarting)) throw error
+		runnerLog('warning', `${error.message} Run vp run status --wait again to keep waiting.`)
+	}
+}
+
+/**
+ * Waits until no other fixture is being applied to this checkout's stack, then holds the turn
+ * until the returned function is called: two applies at once would replace each other's data.
+ */
+async function fixtureTurn(paths: WorktreePaths): Promise<() => void> {
+	const lock = NodePath.join(paths.data, 'fixture.lock')
+	let told = false
+	for (;;) {
+		try {
+			NodeFS.writeFileSync(lock, String(process.pid), { flag: 'wx' })
+			return () => NodeFS.rmSync(lock, { force: true })
+		} catch (error) {
+			if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
+		}
+		let holder: string
+		try {
+			holder = NodeFS.readFileSync(lock, 'utf8')
+		} catch {
+			continue
+		}
+		// Empty while its writer is still writing it.
+		if (holder && !processIsRunning(Number(holder))) {
+			NodeFS.rmSync(lock, { force: true })
+			continue
+		}
+		if (holder && !told) {
+			runnerLog('info', `Waiting for the fixture PID ${holder} is applying.`)
+			told = true
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500))
+	}
+}
+
 /** Sends the running dev runner one line, the way `rs` and `stop` reach it. */
 function sendRunnerCommand(paths: WorktreePaths, command: string): void {
 	NodeFS.appendFileSync(NodePath.join(paths.data, 'dev-commands'), `${command}\n`)
@@ -2282,7 +2408,7 @@ function sendRunnerCommand(paths: WorktreePaths, command: string): void {
 export async function holdStack(
 	paths: WorktreePaths,
 ): Promise<{ readonly release: () => Promise<void> }> {
-	if (readLiveRuntime(paths)) return { release: async () => {} }
+	if (readRunner(paths)) return { release: async () => {} }
 	const child = NodeChildProcess.spawn(
 		process.execPath,
 		[NodeURL.fileURLToPath(import.meta.url), 'dev', '--held', '--hide-windows'],
@@ -2313,7 +2439,7 @@ export async function holdStack(
  * helpers talk to it through.
  */
 export function connectStack(paths: WorktreePaths) {
-	const live = readLiveRuntime(paths)
+	const live = readRunner(paths)
 	if (!live?.pid) throw new DevRunnerError(NOT_RUNNING)
 	const pid = live.pid
 	/** The runner this command talks to, or an error once it can no longer finish the job. */
@@ -2343,7 +2469,7 @@ export function connectStack(paths: WorktreePaths) {
 				// The runner rewrites its file as it works, so one read can come back empty.
 				const current = runtime()
 				if (current && (await runtimeIsReady(current))) return current
-				if (Date.now() > deadline) throw new DevRunnerError('The stack did not become ready.')
+				if (Date.now() > deadline) throw new StillStarting('The stack is not ready yet.')
 				await new Promise((resolve) => setTimeout(resolve, 500))
 			}
 		},
@@ -2379,6 +2505,7 @@ async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
 		process.exitCode = 1
 		return
 	}
+	const release = await fixtureTurn(paths)
 	const waitStarted = performance.now()
 	const record = (result: 'ok' | 'failed') =>
 		recordTiming(paths.primary, {
@@ -2397,6 +2524,8 @@ async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
 		runnerLog('info', 'The stack stays up as far as the fixture got. Applying again starts over.')
 		process.exitCode = 1
 		return
+	} finally {
+		release()
 	}
 	record('ok')
 	await printStatus(paths)
@@ -2427,6 +2556,7 @@ async function sendProgramCommand(
 	const wanted = command === 'stop' ? 'stopped' : 'running'
 	const deadline = Date.now() + READY_WAIT_MS
 	while (Date.now() < deadline) {
+		if (!processIsRunning(before.pid!)) throw new DevRunnerError('The stack stopped.')
 		const state = readLiveRuntime(paths)?.requests[request]
 		if (state === wanted) {
 			runnerLog('info', `${label} ${wanted}`)
@@ -2441,7 +2571,13 @@ async function sendProgramCommand(
 /** Stops the dev runner recorded in the runtime file, and everything it started. */
 async function down(paths: WorktreePaths): Promise<void> {
 	const runtime = readLiveRuntime(paths)
-	if (!runtime?.pid || !processIsDevRunner(runtime.pid)) {
+	if (!runtime?.pid) {
+		runnerLog('info', 'not running')
+		return
+	}
+	if (!processIsDevRunner(runtime.pid)) {
+		// Left by a runner that was killed, and its PID now belongs to something else.
+		writeRuntimeFile(paths, stoppedRuntime(runtime))
 		runnerLog('info', 'not running')
 		return
 	}

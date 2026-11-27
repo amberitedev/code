@@ -56,10 +56,11 @@ for (const crate of [engine, app]) {
 	const db = new DatabaseSync(database)
 	const migrations = NodePath.join(root, crate.dir, 'migrations')
 	for (const file of NodeFS.readdirSync(migrations).sort()) {
-		db.exec(NodeFS.readFileSync(NodePath.join(migrations, file), 'utf8'))
+		if (file.endsWith('.sql')) db.exec(NodeFS.readFileSync(NodePath.join(migrations, file), 'utf8'))
 	}
 	db.close()
 	const offline = NodePath.join(root, crate.dir, '.sqlx')
+	NodeFS.mkdirSync(offline, { recursive: true })
 	for (const file of NodeFS.readdirSync(offline)) {
 		if (/^query-.*\.json$/.test(file)) NodeFS.rmSync(NodePath.join(offline, file))
 	}
