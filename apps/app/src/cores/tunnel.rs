@@ -79,8 +79,8 @@ pub struct Tunnel {
     /// The last connection made. One that closed stays, for where the Core was.
     connection: Mutex<Option<Arc<Connection>>>,
     /// Held while dialing the Core on this computer or its network, so requests that fail
-    /// together dial once. Holds when it last did not answer there.
-    dialing_here: tokio::sync::Mutex<Option<Instant>>,
+    /// together dial once. Holds where and when it last did not answer there.
+    dialing_here: tokio::sync::Mutex<Option<(SocketAddr, Instant)>>,
 }
 
 impl Tunnel {
@@ -134,7 +134,7 @@ impl Tunnel {
     }
 
     /// Connect to the Core at `address` on this computer or its network, unless it did not
-    /// answer there within the last [`REDIAL_REST`]. Calls made together dial once.
+    /// answer at that address within the last [`REDIAL_REST`]. Calls made together dial once.
     pub async fn dial_here(
         &self,
         address: SocketAddr,
@@ -144,11 +144,13 @@ impl Tunnel {
         if self.reached().is_some() {
             return true;
         }
-        if unanswered.is_some_and(|at| at.elapsed() < REDIAL_REST) {
+        if unanswered.is_some_and(|(at, when)| {
+            at == address && when.elapsed() < REDIAL_REST
+        }) {
             return false;
         }
         let answered = self.dial(&[address], within).await;
-        *unanswered = (!answered).then(Instant::now);
+        *unanswered = (!answered).then(|| (address, Instant::now()));
         answered
     }
 

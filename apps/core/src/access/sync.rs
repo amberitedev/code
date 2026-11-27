@@ -10,7 +10,9 @@
 //! owner's devices are introduced on (see `link`).
 
 use std::{
+    future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -160,7 +162,6 @@ fn backoff(failures: u32) -> Duration {
 pub async fn run(sync: Arc<Sync>) {
     let (sender, addresses) = watch::channel(sync.addresses(None).await);
     tokio::spawn(Arc::clone(&sync).watch_addresses(sender));
-    let mut failures = 0;
     loop {
         let address = addresses.borrow().local.clone();
         pairing::pair(&pairing::Pairing {
@@ -178,30 +179,51 @@ pub async fn run(sync: Arc<Sync>) {
             tokio::time::sleep(backoff(1)).await;
             continue;
         };
-        let lost = match sync.connect(&key, &addresses).await {
-            Ok(()) => {
-                failures = 0;
-                info!("connected to the backend");
-                tokio::select! {
-                    lost = sync.serve_owed(&key, &addresses) => lost,
-                    () = link::hold(&sync, &key) => Lost::Removed,
-                }
-            }
-            Err(lost) => lost,
-        };
-        match lost {
-            Lost::Removed => sync.unpair().await,
-            Lost::Unreachable(problem) => {
-                failures += 1;
-                let wait = backoff(failures);
-                warn!(%problem, "lost the backend, reconnecting in {}s", wait.as_secs());
-                tokio::time::sleep(wait).await;
-            }
-        }
+        // The link retries on its own, so an owed call the backend keeps failing does not keep
+        // the owner's devices from being introduced.
+        let link = link::hold(&sync, &key);
+        tokio::pin!(link);
+        sync.serve(&key, &addresses, link).await;
+        sync.unpair().await;
     }
 }
 
 impl Sync {
+    /// Report this Core's state, then send owed calls as they come, reconnecting with backoff
+    /// whenever the backend is lost, until it says this Core was removed. `link` ending means
+    /// that too.
+    async fn serve(
+        &self,
+        key: &str,
+        addresses: &watch::Receiver<Addresses>,
+        mut link: Pin<&mut impl Future<Output = ()>>,
+    ) {
+        let mut failures = 0;
+        loop {
+            let lost = match self.connect(key, addresses).await {
+                Ok(()) => {
+                    failures = 0;
+                    info!("connected to the backend");
+                    tokio::select! {
+                        lost = self.serve_owed(key, addresses) => lost,
+                        () = link.as_mut() => return,
+                    }
+                }
+                Err(lost) => lost,
+            };
+            let Lost::Unreachable(problem) = lost else {
+                return;
+            };
+            failures += 1;
+            let wait = backoff(failures);
+            warn!(%problem, "lost the backend, reconnecting in {}s", wait.as_secs());
+            tokio::select! {
+                () = tokio::time::sleep(wait) => {}
+                () = link.as_mut() => return,
+            }
+        }
+    }
+
     /// The backend key, which the engine is given too.
     async fn key(&self) -> Option<String> {
         let key: Option<String> =

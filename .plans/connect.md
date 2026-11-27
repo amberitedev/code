@@ -52,7 +52,8 @@ within minutes. Friends do learn the host's IP, as with any direct connection.
 The gate lets private addresses through, and the API still requires a session.
 
 **When it fails.** Two strict routers, and no mapped port on the Core's side, have no path. There
-is no fallback: the App says why and gives the fix (turn on UPnP, or forward one port). Because the
+is no fallback. Today the App shows the Core as unreachable; saying why and giving the fix (turn
+on UPnP, or forward one port) is still to build. Because the
 Core maps its port automatically first, a Core with a working router is reachable from any friend,
 whatever the friend's network. Hole-punch success between two unmapped home routers is commonly
 measured at 70-90%.
@@ -70,7 +71,8 @@ copy no code.
 
 ## Protocols on top
 
-One QUIC connection, a stream per use, an ALPN per protocol:
+QUIC agrees on one ALPN per connection, so each protocol gets its own connection, with a stream
+per use:
 
 | ALPN               | Carries                                                                                                                                     | When  |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
@@ -106,7 +108,9 @@ up a Core on this PC"), so the App never needs its own server code.
 
 - **Hosting lock.** A row on the backend: who hosts, since when. Taking it is a compare-and-set, so
   two friends can never fork the world. Two writes per session. A host that disappears loses it
-  after a timeout.
+  after a timeout, and the lock fences it: the host renews its lease while it runs the world and
+  stops the world when a renewal fails, and the timeout is longer than the renewal interval, so
+  the old host has stopped before anyone else can take the lock.
 - **Versions.** When a session ends, the host snapshots the world as content-addressed files.
   Region files change a few at a time, so most of a hand-off is already on the next host.
 - **Moving it.** Over `world/1` from whoever has the newest version and is online.
@@ -176,7 +180,8 @@ is only possible by carrying the bytes, which is what we refuse to pay for.
 
 ## What comes next
 
-ilai moved playing without port forwarding into the alpha, so friends joining ships before it.
+ilai is moving playing without port forwarding into the alpha (on the roadmap's own branch), so
+friends joining ships before it.
 
 **Friends join with no port forwarded.** `game/1`, a `127.0.0.1:<port>` per shared server in
 the friend's App, the server list entry, `LinkedServer` carrying the Core's id and server id.

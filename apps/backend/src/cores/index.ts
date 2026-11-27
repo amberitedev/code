@@ -433,18 +433,21 @@ async function removeCore(request: Request, env: Env, id: string) {
 		.bind(id, user.id)
 		.run()
 	if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
-	const shares = (
-		await env.DB.prepare(
-			'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
-		)
-			.bind(id, user.id)
-			.all<{ id: string }>()
-	).results
-	for (const share of shares) await sweepFiles(env, share.id)
-	// Without it the Core learns on its next call to the backend.
-	await env.CORE_LINK.getByName(id)
-		.unlink()
-		.catch((error: unknown) => console.warn('could not drop the link of a removed Core', error))
+	try {
+		const shares = (
+			await env.DB.prepare(
+				'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
+			)
+				.bind(id, user.id)
+				.all<{ id: string }>()
+		).results
+		for (const share of shares) await sweepFiles(env, share.id)
+	} finally {
+		// Without it the Core learns on its next call to the backend.
+		await env.CORE_LINK.getByName(id)
+			.unlink()
+			.catch((error: unknown) => console.warn('could not drop the link of a removed Core', error))
+	}
 }
 
 export const coreRoutes: Route[] = [
