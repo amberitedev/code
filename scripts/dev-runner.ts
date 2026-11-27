@@ -1331,7 +1331,7 @@ async function buildProgram(
 	let key = initialKey
 	if (complete(key)) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
-	} else if (downloadPrograms(worktree, build, key)) {
+	} else if (await downloadPrograms(worktree, build, key, builds, stopped)) {
 		runnerLog('info', `${spec.label} downloaded ${cached(key)}, built by CI`)
 	} else {
 		const started = performance.now()
@@ -1347,7 +1347,9 @@ async function buildProgram(
 				const run = await compileShared(worktree, spec, build, builds, build.cargoArgs, key)
 				changedCrates += run.changed
 				if (!run.compiled) return undefined
-				if (run.key === key) {
+				// A download may have put them there meanwhile, and Windows will not replace a
+				// program that is running.
+				if (run.key === key && !complete(key)) {
 					NodeFS.mkdirSync(cached(key), { recursive: true })
 					for (const program of build.programs) {
 						const target = NodePath.join(cached(key), program)
@@ -1400,84 +1402,146 @@ export function programsArtifact(key: string): string {
 	return `programs-${process.platform}-${process.arch}-${key}`
 }
 
+const PROGRAMS_WORKFLOW = '.github/workflows/dev-programs.yml'
+
 /**
- * Fetches the programs CI built for this key (the `Dev programs` workflow) into the cache, so a
- * checkout whose Rust is on the default branch compiles nothing. False when there are none, or
- * when `gh` is missing or signed out: the caller builds as before.
+ * Fetches the programs CI built for this key into the cache, so a checkout whose Rust is on the
+ * default branch compiles nothing. False when there are none, or when `gh` is missing, signed out
+ * or offline: the caller builds as before.
  *
- * Only a run on `branch` of this repository counts. Anyone's pull request can upload an artifact
- * under any name, and this one is run.
+ * The runner runs what it downloads, and a pull request can upload an artifact under any name. So
+ * only a `from.event` run of the programs workflow counts, in this repository, for a commit that
+ * is on `from.branch`.
  */
-export function downloadPrograms(
+export async function downloadPrograms(
 	worktree: string,
 	build: Pick<ProgramBuild, 'cacheDir' | 'programs'>,
 	key: string,
-	branch = 'main',
-): boolean {
-	const gh = (args: ReadonlyArray<string>, stdout: 'pipe' | number) =>
-		NodeChildProcess.spawnSync('gh', args, {
-			cwd: worktree,
-			encoding: 'utf8',
-			stdio: ['ignore', stdout, 'ignore'],
-			timeout: 5 * 60_000,
-			windowsHide: true,
+	children: Set<NodeChildProcess.ChildProcess>,
+	stopped: () => boolean,
+	from = { branch: 'main', event: 'push' },
+): Promise<boolean> {
+	// CI builds them for Windows only.
+	if (process.platform !== 'win32') return false
+	/** What the command printed, or `undefined` when it failed or the runner is stopping. */
+	const run = (
+		command: string,
+		args: ReadonlyArray<string>,
+		timeout: number,
+		stdout: 'pipe' | number = 'pipe',
+	) =>
+		new Promise<string | undefined>((resolve) => {
+			if (stopped()) return resolve(undefined)
+			const child = NodeChildProcess.spawn(command, args, {
+				cwd: worktree,
+				stdio: ['ignore', stdout, 'ignore'],
+				timeout,
+				windowsHide: true,
+			})
+			children.add(child)
+			let output = ''
+			child.stdout?.on('data', (chunk: Buffer) => {
+				output += chunk.toString()
+			})
+			child.once('error', () => resolve(undefined))
+			child.once('close', (code) => {
+				children.delete(child)
+				resolve(code === 0 ? output : undefined)
+			})
 		})
+	const api = (path: string, timeout = 30_000, stdout?: number) =>
+		run('gh', ['api', `repos/{owner}/{repo}/actions/${path}`], timeout, stdout)
+	const complete = () =>
+		build.programs.every((program) =>
+			NodeFS.existsSync(NodePath.join(build.cacheDir, key, program)),
+		)
+
 	// Fetched beside the cache and renamed into it, so a half-fetched folder is never taken for
 	// programs, and no other checkout meets it while it tidies the cache.
-	const partial = NodePath.join(`${build.cacheDir}-fetch`, `${key}.${process.pid}`)
+	const staging = `${build.cacheDir}-fetch`
+	const partial = NodePath.join(staging, `${key}.${process.pid}`)
 	const archive = `${partial}.zip`
 	try {
-		const listed = gh(
-			['api', `repos/{owner}/{repo}/actions/artifacts?name=${programsArtifact(key)}`],
-			'pipe',
-		)
-		if (listed.status !== 0) return false
-		const { artifacts } = JSON.parse(listed.stdout) as {
+		// A runner that was killed mid-fetch could not remove its own.
+		for (const entry of NodeFS.existsSync(staging) ? NodeFS.readdirSync(staging) : []) {
+			if (!processIsRunning(Number(entry.split('.')[1]))) {
+				NodeFS.rmSync(NodePath.join(staging, entry), { recursive: true, force: true })
+			}
+		}
+		const listed = await api(`artifacts?name=${programsArtifact(key)}&per_page=100`)
+		if (listed === undefined) return false
+		const { artifacts } = JSON.parse(listed) as {
 			artifacts: ReadonlyArray<{
 				readonly expired: boolean
 				readonly id: number
 				readonly workflow_run?: {
 					readonly head_branch: string
 					readonly head_repository_id: number
+					readonly id: number
 					readonly repository_id: number
 				}
 			}>
 		}
-		const artifact = artifacts.find(
-			({ expired, workflow_run: run }) =>
-				!expired && run?.head_branch === branch && run.head_repository_id === run.repository_id,
-		)
-		if (!artifact) return false
+		let trusted: number | undefined
+		for (const { expired, id, workflow_run: listing } of artifacts) {
+			if (
+				expired ||
+				listing?.head_branch !== from.branch ||
+				typeof listing.repository_id !== 'number' ||
+				listing.head_repository_id !== listing.repository_id
+			) {
+				continue
+			}
+			// The listing names a branch, which a tag or a pull request's head can share.
+			const details = await api(`runs/${listing.id}`)
+			if (details === undefined) continue
+			const { event, head_sha, path } = JSON.parse(details) as {
+				readonly event: string
+				readonly head_sha: string
+				readonly path: string
+			}
+			const onBranch = await run(
+				'git',
+				['merge-base', '--is-ancestor', head_sha, `origin/${from.branch}`],
+				30_000,
+			)
+			if (event === from.event && path === PROGRAMS_WORKFLOW && onBranch !== undefined) {
+				trusted = id
+				break
+			}
+		}
+		if (trusted === undefined) return false
 		NodeFS.mkdirSync(partial, { recursive: true })
 		const file = NodeFS.openSync(archive, 'w')
-		const fetched = gh(['api', `repos/{owner}/{repo}/actions/artifacts/${artifact.id}/zip`], file)
-		NodeFS.closeSync(file)
-		if (fetched.status !== 0) return false
-		// Windows' own `tar` reads zip archives; the one Git brings does not. Elsewhere `unzip` does.
-		const unpacked =
-			process.platform === 'win32'
-				? NodeChildProcess.spawnSync(
-						NodePath.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'),
-						['-xf', archive, '-C', partial],
-						{ windowsHide: true },
-					)
-				: NodeChildProcess.spawnSync('unzip', ['-o', '-q', archive, '-d', partial])
-		const programs = build.programs.map((program) => NodePath.join(partial, program))
-		if (unpacked.status !== 0 || !programs.every((program) => NodeFS.existsSync(program))) {
+		let fetched: string | undefined
+		try {
+			fetched = await api(`artifacts/${trusted}/zip`, 5 * 60_000, file)
+		} finally {
+			NodeFS.closeSync(file)
+		}
+		// Windows' own `tar` reads zip archives; the one Git brings does not.
+		const tar = NodePath.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+		if (fetched === undefined) return false
+		if ((await run(tar, ['-xf', archive, '-C', partial], 60_000)) === undefined) return false
+		if (!build.programs.every((program) => NodeFS.existsSync(NodePath.join(partial, program)))) {
 			return false
 		}
-		// A zip archive does not carry the permission to run.
-		for (const program of programs) NodeFS.chmodSync(program, 0o755)
 		// A machine that has never built has no cache yet.
 		NodeFS.mkdirSync(build.cacheDir, { recursive: true })
 		NodeFS.renameSync(partial, NodePath.join(build.cacheDir, key))
 		return true
 	} catch {
-		// Not answered as expected, or another checkout put the programs there first: build instead.
-		return false
+		// Not answered as expected, or another checkout put the programs there first.
+		return complete()
 	} finally {
-		NodeFS.rmSync(archive, { force: true })
-		NodeFS.rmSync(partial, { recursive: true, force: true })
+		// Windows may still hold what was just written, and a failed tidy must not fail the build.
+		for (const left of [archive, partial]) {
+			try {
+				NodeFS.rmSync(left, { recursive: true, force: true })
+			} catch {
+				// Left for the next fetch.
+			}
+		}
 	}
 }
 

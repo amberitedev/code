@@ -102,10 +102,12 @@ for Windows and keeps both programs for 90 days in an artifact named after the k
 downloads. So a checkout whose Rust is `main`'s compiles nothing, even on a machine that never built
 it. Two traps:
 
-- The key only matches when `packages/engine/.env` is the copy of `.env.prod` that setup makes.
-  Other settings give another key, and that checkout compiles its own.
-- Only an artifact from a run on `main` of this repository is taken. A pull request can upload one
-  under any name, and the runner runs what it downloads.
+- The key only matches when `packages/engine/.env` is the copy of `.env.prod` that setup makes, and
+  no `.env.local` or environment variable overrides what it sets. Other settings give another key,
+  and that checkout compiles its own.
+- Only an artifact that workflow made on a push to `main` of this repository, for a commit that is
+  on `main`, is taken. A pull request can upload one under any name, and the runner runs what it
+  downloads.
 
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
 its window hidden, in `--amberite-dev-config` when it starts.

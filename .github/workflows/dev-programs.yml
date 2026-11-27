@@ -57,6 +57,8 @@ jobs:
         with:
           # Where the dev runner compiles.
           cache-workspaces: '. -> target/dev-shared'
+          # A pull request's cache would only take room from main's.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
           # The action's default fails on warnings, and a checkout builds with no flags of its own.
           rustflags: ''
       # The settings every checkout's dev programs are built with, so their keys match this one.
@@ -70,6 +72,9 @@ jobs:
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
           echo "key=${artifact##*-}" >> "$GITHUB_OUTPUT"
       - run: node scripts/dev-runner.ts build
+      # A backtrace names its frames from these, which a program looks for beside itself.
+      - run: cp target/dev-shared/debug/amberite_app.pdb target/dev-shared/debug/copal.pdb "target/dev-shared/dev-bin/${{ steps.build.outputs.key }}/"
+        shell: bash
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.build.outputs.artifact }}
