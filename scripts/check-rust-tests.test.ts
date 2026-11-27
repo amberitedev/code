@@ -38,6 +38,34 @@ const FILES: Readonly<Record<string, readonly [source: string, lines: ReadonlyAr
 		[7, 10, 14, 15, 22],
 	],
 	'src/helpers.rs': ['pub fn settle() {\n    tokio::time::sleep(WAIT);\n}\n', [2]],
+	'src/imported.rs': [
+		[
+			'use tokio::time::Instant;',
+			'#[tokio::test(start_paused = true)]',
+			'async fn tokio_clock() {',
+			'    let start = Instant::now();',
+			'    assert!(start.elapsed() > WAIT);',
+			'}',
+			'#[tokio::test(start_paused = true)]',
+			'async fn std_clock() {',
+			'    let start = std::time::Instant::now();',
+			'    assert!(start.elapsed() > WAIT);',
+			'}',
+			'',
+		].join('\n'),
+		[10],
+	],
+	'src/full_path.rs': [
+		[
+			'#[tokio::test(start_paused = true)]',
+			'async fn tokio_clock() {',
+			'    let start = tokio::time::Instant::now();',
+			'    assert!(start.elapsed() > WAIT);',
+			'}',
+			'',
+		].join('\n'),
+		[],
+	],
 }
 
 it('reports sleeps, clock deltas and unmarked ignores in test code, and only there', () => {

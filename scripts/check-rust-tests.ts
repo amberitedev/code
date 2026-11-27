@@ -24,15 +24,19 @@ const WAITS = [
 		pattern: /(?:\b[\w:]*::)?\b(?<!fn )sleep(?:_until)?\s*\(/g,
 		message: 'sleeps; await the event instead',
 		// A sleep is tokio's unless the thread's.
-		tokio: (match: string) => !/\bthread::/.test(match),
+		tokio: (match: string, _test: string) => !/\bthread::/.test(match),
 	},
 	{
 		pattern:
 			/(?:\b[\w:]*::)?\bInstant::now\s*\(\s*\)\s*[-+]|\.elapsed\s*\(\s*\)|\b(?:checked_|saturating_)?duration_since\s*\(/g,
 		message: 'measures elapsed time; assert on events and counts',
-		tokio: (match: string, usesTokioInstant: boolean) =>
-			/\btokio::time::Instant::now/.test(match) ||
-			(usesTokioInstant && !/\bstd::time::/.test(match)),
+		// The test's `Instant` is tokio's when it names tokio's or the file imports it, and never
+		// when the test reads `std`'s.
+		tokio: (match: string, test: string) =>
+			!/\bstd::time::/.test(match) &&
+			(/\btokio::time::Instant\b/.test(match) ||
+				(!/\bstd::time::Instant\b/.test(test) &&
+					/\btokio::time::(?:\{[^}]*)?\bInstant\b/.test(test))),
 	},
 ]
 
@@ -125,15 +129,23 @@ function testRanges(code: string): ReadonlyArray<Range> {
 function problems(source: string, wholeFile: boolean): ReadonlyArray<string> {
 	const code = codeOnly(source)
 	const ranges = testRanges(code)
-	const usesTokioInstant = /\buse\s+tokio::time::(?:\{[^}]*\bInstant\b|Instant\b)/.test(code)
-	const within = (index: number, paused: boolean) =>
-		ranges.some((range) => index >= range.from && index < range.to && range.paused === paused)
+	// The file's import of tokio's `Instant`, which its paused tests read as their own.
+	const tokioImport = /\buse\s+tokio::time::(?:\{[^}]*\bInstant\b|Instant\b)[^;]*;/.exec(code)?.[0]
+	const enclosing = (index: number, paused: boolean) =>
+		ranges.find((range) => index >= range.from && index < range.to && range.paused === paused)
+	const within = (index: number, paused: boolean) => enclosing(index, paused) !== undefined
 	const lineOf = (index: number) => code.slice(0, index).split('\n').length
 	const found: Array<readonly [number, string]> = []
 	for (const { pattern, message, tokio } of WAITS) {
 		for (const match of code.matchAll(pattern)) {
 			if (!wholeFile && !within(match.index, false) && !within(match.index, true)) continue
-			if (within(match.index, true) && tokio(match[0], usesTokioInstant)) continue
+			const paused = enclosing(match.index, true)
+			if (
+				paused &&
+				tokio(match[0], `${tokioImport ?? ''}\n${code.slice(paused.from, paused.to)}`)
+			) {
+				continue
+			}
 			found.push([lineOf(match.index), `\`${match[0].replace(/\s*\(.*$/s, '')}\` ${message}`])
 		}
 	}
