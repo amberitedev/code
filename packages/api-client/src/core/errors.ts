@@ -38,11 +38,6 @@ export class ModrinthApiError extends Error {
 		this.originalError = data?.originalError
 		this.responseData = data?.responseData
 		this.context = data?.context
-
-		// Maintains proper stack trace for where our error was thrown (only available on V8)
-		if (Error.captureStackTrace) {
-			Error.captureStackTrace(this, ModrinthApiError)
-		}
 	}
 
 	/**

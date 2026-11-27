@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { SearchIcon } from '@modrinth/assets'
-import Fuse from 'fuse.js/dist/fuse.basic'
+import Fuse from 'fuse.js/basic'
 import { computed, ref } from 'vue'
 
 import CheckCircleButton from '#ui/components/base/buttons/CheckCircleButton.vue'

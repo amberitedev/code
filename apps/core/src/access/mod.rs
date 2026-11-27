@@ -8,6 +8,7 @@
 
 pub mod activity;
 pub mod keys;
+pub mod link;
 pub mod local;
 pub mod owed;
 pub mod pairing;
@@ -153,7 +154,7 @@ impl Drop for StreamGuard {
     }
 }
 
-/// The peer address of an HTTPS connection, for limits. The local socket has none.
+/// The peer address of a Connect or HTTPS connection, for limits. The local socket has none.
 #[derive(Debug, Clone, Copy)]
 pub struct Peer(pub IpAddr);
 
@@ -236,8 +237,8 @@ impl Access for CoreAccess {
 
 /// The owner doing something dangerous: deleting a server; ending another device's session;
 /// updating or rolling back Core; removing Core from its account; restoring or deleting a backup,
-/// or keeping fewer scheduled ones. Over HTTPS this needs a fresh ticket (see [`fresh_ticket`]);
-/// the local CLI needs none.
+/// or keeping fewer scheduled ones. From another device this needs a fresh ticket (see
+/// [`fresh_ticket`]); the local CLI needs none.
 pub struct Dangerous(pub Caller);
 
 impl FromRequestParts<Shared> for Dangerous {

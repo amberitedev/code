@@ -21,7 +21,7 @@ mod launcher;
 pub mod routes;
 pub mod self_hosted;
 pub mod state;
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 mod ts;
 
 pub use api::*;

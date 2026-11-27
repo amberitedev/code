@@ -89,7 +89,7 @@ pub fn core() -> Result<()> {
 }
 
 /// Run Core until `stop` resolves or an update asks for a restart: adopt running servers, then
-/// serve the API over HTTPS and the local socket. Servers keep running after Core stops.
+/// serve the API over Connect, HTTPS and the local socket. Servers keep running after Core stops.
 pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
@@ -193,6 +193,12 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     tokio::spawn(api::events::watch_power(Arc::clone(&state)));
     tokio::spawn(api::follow::apply_on_stop(Arc::clone(&state)));
     let router = api::router(Arc::clone(&state));
+    let address = SocketAddr::new(config.bind, config.port);
+    let connect = Arc::new(crate::network::connect::Connect::open(
+        address,
+        identity.connect.clone(),
+        Arc::clone(&network),
+    )?);
     match config.backend_url.clone() {
         Some(backend_url) => {
             tokio::spawn(access::sync::run(Arc::new(access::sync::Sync {
@@ -206,6 +212,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
                 access: Arc::clone(&access),
                 storage,
                 network,
+                connect: Arc::clone(&connect),
                 sessions: state.engine.sessions.clone(),
             })));
             tokio::spawn(
@@ -217,7 +224,6 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         ),
     }
 
-    let address = SocketAddr::new(config.bind, config.port);
     let listener = listen(address)
         .wrap_err_with(|| format!("could not listen on {address}"))?;
     // On every IPv4 address by default, so on every IPv6 one too. A machine without IPv6 skips it.
@@ -246,17 +252,25 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         env!("CARGO_PKG_VERSION")
     );
     tokio::spawn(answer_once(paths.clone()));
-    tokio::select! {
-        () = crate::network::tls::serve(listener, router.clone(), &identity) => {}
-        () = serve_v6 => {}
-        result = access::local::serve(&paths, &owner, router) => result?,
+    let exit = tokio::select! {
+        () = crate::network::tls::serve(listener, router.clone(), &identity) => Exit::Stopped,
+        () = serve_v6 => Exit::Stopped,
+        () = connect.serve(router.clone()) => Exit::Stopped,
+        result = access::local::serve(&paths, &owner, router) => {
+            result?;
+            Exit::Stopped
+        }
         () = update.restart.notified() => {
             info!("restarting into another version; servers keep running");
-            return Ok(Exit::Restart);
+            Exit::Restart
         }
-        () = stop => info!("stopping; servers keep running"),
-    }
-    Ok(Exit::Stopped)
+        () = stop => {
+            info!("stopping; servers keep running");
+            Exit::Stopped
+        }
+    };
+    connect.close().await;
+    Ok(exit)
 }
 
 /// The engine on `<root>/engine`, whose instances are the servers. Nothing desktop starts. Its

@@ -53,11 +53,11 @@ The most common defect in this repo is a change that works on the path you teste
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
 - Setup runs in the background. While `.data/setup.json` says `running` and its PID is alive, wait for it and do not run `vp i`. It ends as `done` or `failed` (with the error). After a failure, or with no file, run `vp i` yourself.
-- `vp run fixture <name>` starts the programs that fixture names and seeds them.
-- Ports derive from the worktree path and are stable across restarts, but read the real ones from `vp run status`, since occupied ports shift.
-- Nothing rebuilds Rust for you. After a Rust edit, run `vp run rs <name>`. The first build takes minutes, so run it in the background.
-- Stop the stack with `vp run down`. Never kill a process by name or path: other worktrees run stacks too.
-- When you finish, run `vp run down`, then `vp run fixture --show-windows` so the developer can try the change.
+- Whoever starts a stack holds it, and it stops when they do. Start yours as a background task with `vp run dev --hide-windows`, or `vp run dev <fixture> --hide-windows` to seed it, then run `vp run status --wait`: it returns once the stack is ready and prints each App's `tab:` URL, or fails saying why. The first build takes minutes.
+- `vp run fixture <name>` replaces the running stack's data and waits until it is ready. Tab URLs stay the same across fixtures and restarts.
+- Nothing rebuilds Rust for you. After a Rust edit, run `vp run rs <name>`.
+- Stop your stack when you finish by stopping its task, or with `vp run down`. Never kill a process by name or path: other worktrees run stacks too.
+- Do not leave a stack running for the developer. Tell them which fixture shows the change, as `vp run dev <fixture>`.
 
 Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
@@ -65,6 +65,7 @@ Every command, the log, and ports: [scripts](docs/internals/scripts.md).
 
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files: lint, typos, TOML, knip, typecheck and tests of the affected packages, and for Rust `rustfmt`, the test rules, a build, and Clippy and the tests of changed crates. **Do not run repo-wide checks** (`vp check`, `vp run -r test`, `vp run -r typecheck`) unless asked. CI owns the full suite.
 - Iterate with only the tests that cover what you changed: `vp test run <files>`, and for Rust `node scripts/dev-runner.ts test <crate>`. A plain `cargo test` rebuilds everything in a separate folder.
+- After changing a Rust wire type, `vp run gen:ts` writes the TypeScript the crates generate. After changing a query or a migration, `vp run sqlx:prepare` writes the `.sqlx` files.
 - Follow [testing](docs/internals/testing.md) for what to test, bug-fix proof, waiting for work (no sleeps or polling), and real-app [Scenarios](docs/internals/testing.md#scenarios) (`vp run scenarios:prove`).
 - Give user-visible App changes one integrated pass in the real App, on a [fixture](docs/internals/fixtures.md) that describes the state the change needs: [test-app](.agents/skills/test-app/SKILL.md) (primary agent only, once after integrating; subagents do not start dev stacks). Inspect the rendered result and walk the flow as a user would, checking layout, visual hierarchy and ergonomics, and fix anything rough before handing back.
 
@@ -86,7 +87,7 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 ## How it works
 
-The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. Merging upstream: `node scripts/upstream-sync.ts`.
+The App and a Core do the same things to an instance with one engine and one protocol. Rust imports go one way: `contracts`, `connect` <- `sharing-client` <- `engine` <- `apps/app`, `apps/core`. Merging upstream: `node scripts/upstream-sync.ts`.
 
 `.repos/modrinth` is a plain checkout of Modrinth's latest `main`, gitignored, for reading and grepping upstream. `SYNCED.json` names its commit. Never edit or import from `.repos/`. If it is missing or stale, run `vp run sync:repos`. Merges and ports use the `modrinth/main` ref, not this copy. Its `AGENTS.md` files are Modrinth's rules, not ours.
 
@@ -97,6 +98,7 @@ The App and a Core do the same things to an instance with one engine and one pro
 - `apps/core` - Rust. The Core, shipped as Copal.
 - `apps/backend` - TypeScript on Cloudflare Workers. Accounts, friends and share details.
 - `packages/contracts` - Wire types and `Endpoint` declarations. No logic.
+- `packages/connect` - Rust. Direct connections between Apps and Cores with no port forwarded. Imports none of our crates.
 - `apps/app-frontend` - Vue. The App's UI.
 - `packages/ui` - Modrinth's shared Vue components. Reuse before adding.
 - `packages/api-client` - The one TypeScript client.

@@ -2,9 +2,10 @@ packages:
   - 'apps/*'
   - 'packages/*'
 overrides:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.9
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
+  # vue-tsc 2 fails the App typecheck on newer vue, and vue-tsc 3 needs fixes across upstream components.
   vue: 3.5.27
-minimumReleaseAge: 10080 # 7 days
+minimumReleaseAge: 1440 # 1 day
 # Every checkout links its packages from one shared copy in the store instead of copying them, so
 # installing in a new worktree takes about a minute instead of eight.
 enableGlobalVirtualStore: true

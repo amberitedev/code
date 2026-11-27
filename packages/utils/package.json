@@ -6,17 +6,17 @@
 	"types": "./index.ts",
 	"scripts": {},
 	"dependencies": {
-		"@codemirror/commands": "^6.3.2",
-		"@codemirror/lang-markdown": "^6.2.3",
-		"@codemirror/language": "^6.9.3",
-		"@codemirror/state": "^6.3.2",
-		"@codemirror/view": "^6.22.1",
-		"@types/markdown-it": "^14.1.1",
-		"dayjs": "^1.11.10",
-		"highlight.js": "^11.9.0",
+		"@codemirror/commands": "^6.11.2",
+		"@codemirror/lang-markdown": "^6.5.2",
+		"@codemirror/language": "^6.13.1",
+		"@codemirror/state": "^6.7.6",
+		"@codemirror/view": "^6.44.2",
+		"@types/markdown-it": "^14.2.0",
+		"dayjs": "^1.11.23",
+		"highlight.js": "^11.12.0",
 		"highlightjs-mcfunction": "github:modrinth/better-highlightjs-mcfunction",
 		"markdown-it": "^14.1.0",
-		"xss": "^1.0.14"
+		"xss": "^1.0.17"
 	},
 	"devDependencies": {
 		"@modrinth/api-client": "workspace:*",

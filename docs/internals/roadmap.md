@@ -105,9 +105,9 @@ Each group is about one chat.
 
 **Release**
 
-- Playing without port forwarding: an introducer on the backend, UDP hole punching, then a QUIC
-  tunnel between a friend's App and the Core. The design is Lodestone's, written fresh because
-  their code is AGPL-3.0. There is no relay, so game traffic never reaches the backend.
+- Playing without port forwarding: the backend introduces a friend's App to the Core, as it
+  already does the owner's, and Minecraft travels over that direct connection. There is no
+  relay, so game traffic never reaches the backend. The plan is `.plans/connect.md`.
 - A real logo, and a look over every screen.
 - A video, and posts where modded players and self-hosters are.
 

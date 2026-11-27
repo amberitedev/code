@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { readSide, type Side, upload, verdict } from './prove-scenario.ts'
+import { readSide, renderProof, type Side, upload, verdict } from './prove-scenario.ts'
 
 const report = (...attempts: ReadonlyArray<{ status: string; code?: string }>) => ({
 	run: {
@@ -72,5 +72,25 @@ describe('upload', () => {
 	it('links nothing when the lines do not match the captures', () => {
 		expect(upload(print('https://a'), ['one.png', 'two.png']).size).toBe(0)
 		expect(upload(print(''), ['one.png']).size).toBe(0)
+	})
+})
+
+describe('renderProof', () => {
+	it('puts each capture beside the one base took under the same name', () => {
+		const proof = renderProof({
+			title: 'a server page names its server',
+			result: { text: 'Proven', exit: 0 },
+			base: {
+				status: 'failed',
+				title: '',
+				captures: ['base/001-page.png', 'base/002-failure.png'],
+			},
+			head: { status: 'passed', title: '', captures: ['head/001-page.png'] },
+			baseName: 'main',
+			link: (capture) => `./${capture}`,
+		})
+		expect(proof).toContain('### A server page names its server')
+		expect(proof).toContain('| ![Before](./base/001-page.png) | ![After](./head/001-page.png) |')
+		expect(proof).not.toContain('002-failure')
 	})
 })

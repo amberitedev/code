@@ -1,9 +1,10 @@
 import { PROTOCOL_VERSION } from '@amberite/contracts/protocol'
 import type { ListedCore } from '@amberite/contracts/backend'
-import type { Server } from '@amberite/contracts/core'
+import type { CoreSession, Server } from '@amberite/contracts/core'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import type { AbstractModrinthClient } from '../core/abstract-client'
+import { ApiCallError } from '../contracts/errors'
 import { READY_MS } from '../events/event-stream'
 import { Cores } from './cores'
 
@@ -12,12 +13,11 @@ import { GenericModrinthClient } from '../platform/generic'
 import type { RequestOptions } from '../types/request'
 
 const ACCOUNTS = 'https://accounts.example'
-const LOCAL = 'https://192.168.1.2:16662'
 const CORE: ListedCore = {
 	id: 'core',
 	name: 'Core',
 	version: null,
-	address: LOCAL,
+	address: 'https://192.168.1.2:16662',
 	public_address: 'https://203.0.113.5:16662',
 	cert_fingerprint: 'ab'.repeat(32),
 	created: '',
@@ -51,32 +51,150 @@ const LISTED: Server = {
 	eula_accepted: true,
 }
 
+const DIALER = { id: 'cd'.repeat(32), candidates: ['198.51.100.9:40000'] }
+const INTRODUCED = ['203.0.113.5:16662']
+
 /**
- * Lists `CORE`, which has `LISTED`. Its local address answers the health check when `home` is set.
+ * Lists `CORE`, which has `LISTED`. With `home` the Core answers on this computer's network.
+ * Otherwise it is reached once the backend introduced this device, unless it is `off` or no path
+ * between the two opens (`blocked`).
  */
 class FakeClient extends GenericModrinthClient {
+	/** What `connectCore` was given as the backend's introduction, per call. */
+	public connects: (string[] | undefined)[] = []
+	public introductions = 0
+	public off = false
+	public blocked = false
+	/** The tickets sign-ins were made with. */
+	public signIns: string[] = []
+	/** The next sign-in finds no connection to the Core. */
+	public signInOffline = false
+
 	constructor(private readonly home: boolean) {
 		super({
 			labrinthBaseUrl: ACCOUNTS,
-			connectCore: async (_coreId, address) =>
-				`http://127.0.0.1:5000/${encodeURIComponent(address)}`,
+			connectCore: async (_coreId, _address, _fingerprint, introduced) => {
+				this.connects.push(introduced)
+				const base = 'http://127.0.0.1:5000/secret/core/0'
+				const dialer = introduced ? null : DIALER
+				if (this.home)
+					return this.off
+						? { base, reached: null, dialer }
+						: { base, reached: 'local', dialer: null }
+				if (introduced && !this.off && !this.blocked)
+					return { base, reached: 'internet', dialer: null }
+				return { base, reached: null, dialer }
+			},
+			coreSessions: {
+				signIn: async (_coreId, _fingerprint, ticket) => {
+					this.signIns.push(ticket)
+					if (this.signInOffline) {
+						this.signInOffline = false
+						throw new ApiCallError(503, 'core_offline', 'This Core is not connected right now.')
+					}
+					return {} as CoreSession
+				},
+				signOut: async () => {},
+				exists: async () => false,
+			},
 			features: [new SelfHostedFeature({ baseUrl: ACCOUNTS, token: async () => undefined })],
 		})
 	}
 
-	protected async platformFetch(input: RequestInfo | URL): Promise<Response> {
+	protected async platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 		const url = String(input)
 		if (url === `${ACCOUNTS}/cores`) return Response.json([CORE])
+		if (url === `${ACCOUNTS}/cores/${CORE.id}/introduce`) {
+			this.introductions++
+			expect(JSON.parse(String(init?.body))).toEqual(DIALER)
+			return this.off
+				? Response.json({ error: 'core_offline', description: '' }, { status: 503 })
+				: Response.json({ candidates: INTRODUCED })
+		}
+		if (url === `${ACCOUNTS}/cores/${CORE.id}/ticket`) return Response.json({ ticket: 'ticket' })
 		if (url.endsWith('/health')) return Response.json({ protocol: PROTOCOL_VERSION })
 		if (url.endsWith('/servers')) return Response.json([LISTED])
 		return new Response(null, { status: 404 })
 	}
 
-	protected async executeRequest<T>(url: string, _options: RequestOptions): Promise<T> {
-		if (url.includes(encodeURIComponent(LOCAL)) && !this.home) throw new Error('no answer')
+	protected async executeRequest<T>(_url: string, _options: RequestOptions): Promise<T> {
 		return {} as T
 	}
 }
+
+describe('connecting to a Core', () => {
+	it('leaves the backend out when the Core answers on this network', async () => {
+		const client = new FakeClient(true)
+		await client.cores.url(CORE.id)
+		expect(client.introductions).toBe(0)
+		expect(client.connects).toEqual([undefined])
+	})
+
+	it('dials a Core on this network again at once, while the backend waits to be asked again', async () => {
+		const client = new FakeClient(true)
+		client.off = true
+		await client.cores.url(CORE.id)
+		expect(client.introductions).toBe(1)
+		expect(await client.cores.reconnect(CORE.id)).toBe(false)
+		client.off = false
+		expect(await client.cores.reconnect(CORE.id)).toBe(true)
+		expect(client.introductions).toBe(1)
+	})
+
+	it('waits before asking the backend again when no path opened after an introduction', async () => {
+		const client = new FakeClient(false)
+		client.blocked = true
+		await client.cores.url(CORE.id)
+		expect(client.introductions).toBe(1)
+		expect(await client.cores.reconnect(CORE.id)).toBe(false)
+		expect(client.introductions).toBe(1)
+	})
+
+	it('signs in once connected when the Core was not, with the same unused ticket', async () => {
+		const client = new FakeClient(false)
+		client.signInOffline = true
+		await client.cores.signIn(CORE)
+		expect(client.signIns).toEqual(['ticket', 'ticket'])
+	})
+
+	it('has the backend introduce this device to a Core on another network', async () => {
+		const client = new FakeClient(false)
+		await client.cores.url(CORE.id)
+		expect(client.introductions).toBe(1)
+		expect(client.connects).toEqual([undefined, INTRODUCED])
+		expect(await client.cores.reconnect(CORE.id)).toBe(true)
+	})
+
+	it('asks the backend again for a Core that is off only after a wait that doubles', async () => {
+		vi.useFakeTimers()
+		try {
+			const client = new FakeClient(false)
+			client.off = true
+			await client.cores.url(CORE.id)
+			expect(client.introductions).toBe(1)
+
+			// Requests keep failing meanwhile; none of them asks the backend.
+			expect(await client.cores.reconnect(CORE.id)).toBe(false)
+			await client.cores.list()
+			await client.cores.url(CORE.id)
+			expect(client.introductions).toBe(1)
+
+			await vi.advanceTimersByTimeAsync(15_000)
+			expect(await client.cores.reconnect(CORE.id)).toBe(false)
+			expect(client.introductions).toBe(2)
+			await vi.advanceTimersByTimeAsync(15_000)
+			expect(await client.cores.reconnect(CORE.id)).toBe(false)
+			expect(client.introductions).toBe(2)
+
+			client.off = false
+			await vi.advanceTimersByTimeAsync(15_000)
+			expect(await client.cores.reconnect(CORE.id)).toBe(true)
+			expect(client.introductions).toBe(3)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
 
 describe('the Core of a server', () => {
 	it('is the listed Core that has it, and none for a server no Core has', async () => {
@@ -90,7 +208,7 @@ describe('the Core of a server', () => {
 })
 
 describe('joinNet', () => {
-	it('joins at the Core’s own address and the game port when the Core answers there', async () => {
+	it('joins at the Core’s own address and the game port when the Core is on this network', async () => {
 		const client = new FakeClient(true)
 		await client.cores.servers()
 		expect(client.cores.joinNet(SERVER)).toMatchObject({

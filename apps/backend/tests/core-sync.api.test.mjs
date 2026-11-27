@@ -103,6 +103,59 @@ test('a signed-out Core waits on a socket that approval closes', async () => {
 	})
 })
 
+test('the backend introduces the owner to a Core over its link, and writes nothing', async () => {
+	await withCore('core-link', async ({ backend, call, writes }) => {
+		const before = await writes()
+		const dialer = { id: 'ab'.repeat(32), candidates: ['203.0.113.9:40000', '[2001:db8::1]:40000'] }
+		const introduce = (token, body = dialer) => call('POST', '/cores/core/introduce', body, token)
+
+		// No link: the Core is off, or cannot reach the backend.
+		const off = await introduce('mra_owner')
+		assert.equal(off.status, 503)
+		assert.equal((await off.json()).error, 'core_offline')
+
+		const link = await backend.fetch('http://local.test/core/link', {
+			headers: { upgrade: 'websocket', authorization: 'Bearer amc_test' },
+		})
+		assert.equal(link.status, 101)
+		link.webSocket.accept()
+		const introduced = []
+		link.webSocket.addEventListener('message', (event) => {
+			const introduction = JSON.parse(event.data)
+			introduced.push(introduction.dialer)
+			link.webSocket.send(
+				JSON.stringify({ request: introduction.request, candidates: ['198.51.100.7:16662'] }),
+			)
+		})
+
+		const answer = await introduce('mra_owner')
+		assert.equal(answer.status, 200)
+		assert.deepEqual(await answer.json(), { candidates: ['198.51.100.7:16662'] })
+		assert.deepEqual(introduced, [dialer])
+
+		// Nobody but the owner is introduced, and the Core is not told about them.
+		assert.equal((await introduce('mra_friend')).status, 404)
+		assert.equal((await introduce('mra_owner', { id: 'short', candidates: [] })).status, 400)
+		assert.equal(
+			(await introduce('mra_owner', { ...dialer, candidates: ['core.example:1'] })).status,
+			400,
+		)
+		assert.deepEqual(introduced, [dialer])
+		assert.equal(await writes(), before)
+
+		// A key no Core has cannot hold a link.
+		const stranger = await backend.fetch('http://local.test/core/link', {
+			headers: { upgrade: 'websocket', authorization: 'Bearer amc_other' },
+		})
+		assert.equal(stranger.status, 410)
+
+		// Removing the Core drops its link, so it learns at once.
+		const closed = new Promise((resolve) => link.webSocket.addEventListener('close', resolve))
+		assert.equal((await call('DELETE', '/cores/core', undefined, 'mra_owner')).status, 204)
+		await closed
+	})
+})
+
 test('tickets carry the user and the Core, for the owner only', async () => {
 	await withCore('core-tickets', async ({ call, writes }) => {
 		const before = await writes()

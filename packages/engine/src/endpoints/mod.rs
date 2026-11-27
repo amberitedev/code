@@ -22,7 +22,7 @@ groups!(
     process, sharing, store, tags, worlds,
 );
 
-#[cfg(test)]
+#[cfg(all(test, feature = "export-ts"))]
 mod tests {
     use contracts::Reach;
 

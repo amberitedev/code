@@ -5,8 +5,9 @@
 A fixture is a TypeScript file that seeds the dev environment to what you describe, for easier
 testing.
 
-`vp run fixture <file>` wipes the stack and runs the file from the top against the current code.
-Ready-made ones are in `packages/fixtures/fixtures` and run by name, like `vp run fixture default`.
+`vp run dev <file>` starts a stack with it, and `vp run fixture <file>` wipes the running stack
+and runs the file from the top against the current code. Ready-made ones are in
+`packages/fixtures/fixtures` and run by name, like `vp run fixture default`.
 
 ## How it works
 

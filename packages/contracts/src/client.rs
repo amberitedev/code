@@ -1,5 +1,5 @@
 //! The Rust caller of any [`Endpoint`]. [`request`] and [`response`] build and read a call for any
-//! HTTP transport, such as a hyper connection on a local socket or a pinned TLS tunnel; [`call`]
+//! HTTP transport, such as a hyper connection on a local socket or a stream to a Core; [`call`]
 //! and the functions beside it send one with reqwest.
 
 use std::{fmt::Write, time::Duration};

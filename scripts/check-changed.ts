@@ -9,9 +9,11 @@
 //   vp run check:changed          compare against the merge base with origin/main
 //   vp run check:changed <ref>    compare against the merge base with <ref>
 //
-// Uncommitted and untracked files count. CI still runs the full suites.
+// Uncommitted and untracked files count. CI still runs the full suites. A vp step that passed on
+// this exact checkout is not run again; the Rust build and tests keep their own record by inputs.
 
 import * as NodeChildProcess from 'node:child_process'
+import * as NodeCrypto from 'node:crypto'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 
@@ -84,8 +86,6 @@ type Step = {
 	readonly args: ReadonlyArray<string>
 	/** Added after `args`, over as many runs as it takes to keep each command line short. */
 	readonly files?: ReadonlyArray<string>
-	/** A step that starts once this one has finished, whether or not it passed. */
-	readonly next?: Step
 	/** TypeScript's incremental state, which it reads and writes as `--tsBuildInfoFile`. */
 	readonly buildInfo?: string
 }
@@ -158,74 +158,85 @@ if (rust.length > 0) {
 		files: rust,
 	})
 }
-// Builds go one at a time anyway, so Clippy and the Rust tests follow the build in one chain.
-let rustTests: Step | undefined
+const linted: string[] = []
+const rustTests: string[] = []
 const crates = under('apps', 'packages') ? workspaceCrates() : []
 if (crates === 'no cargo') skipped.push('rust tests (cargo is not installed)')
 else if (crates === 'failed') failed.push('rust tests (cargo metadata failed)')
 else {
 	// The crates CI leaves out of the workspace tests (ci.yml, rust job).
 	const untested = new Set(['toasty'])
-	const linted = crates.filter((crate) => under(crate.folder)).map((crate) => crate.name)
-	const tested = linted.filter((crate) => !untested.has(crate))
-	if (linted.includes('amberite-app')) {
+	const changedCrates = crates.filter((crate) => under(crate.folder)).map((crate) => crate.name)
+	const tested = changedCrates.filter((crate) => !untested.has(crate))
+	if (changedCrates.includes('amberite-app')) {
 		// Tauri only checks that the frontend build folder exists, as in CI.
 		NodeFS.mkdirSync(NodePath.join(root, 'apps', 'app-frontend', 'dist'), { recursive: true })
 	}
-	const tests: Step | undefined =
-		tested.length > 0
-			? { name: 'rust tests', command: 'node', args: ['scripts/dev-runner.ts', 'test', ...tested] }
-			: undefined
-	rustTests =
-		linted.length > 0
-			? {
-					name: 'clippy',
-					command: 'node',
-					args: ['scripts/dev-runner.ts', 'clippy', ...linted],
-					next: tests,
-				}
-			: tests
+	linted.push(...changedCrates)
+	rustTests.push(...tested)
 }
+// One step: the build, Clippy and tests share this checkout's build output, where Cargo runs one
+// at a time.
 if (touched.some((file) => /\.rs$|(?:^|\/)Cargo\.(?:toml|lock)$/.test(file))) {
 	steps.push({
-		name: 'rust build',
+		name: linted.length > 0 ? 'rust build, clippy and tests' : 'rust build',
 		command: 'node',
-		args: ['scripts/dev-runner.ts', 'build'],
-		next: rustTests,
+		args: [
+			'scripts/dev-runner.ts',
+			'build',
+			...linted.flatMap((crate) => ['--clippy', crate]),
+			...rustTests.flatMap((crate) => ['--test', crate]),
+		],
 	})
-} else if (rustTests) steps.push(rustTests)
+} else if (linted.length > 0) {
+	steps.push({
+		name: 'clippy and rust tests',
+		command: 'node',
+		args: ['scripts/dev-runner.ts', 'clippy', ...linted, '--test', ...rustTests],
+	})
+}
 
 console.log(`[check] ${changed.length} changed files since ${base.slice(0, 9)}`)
+const passedFile = NodePath.join(root, '.data', 'check-passed.json')
+const passed = readPassed()
+const checkout = checkoutHash()
 // Every step runs at once; each one's output is printed whole when it finishes.
-const results = (
-	await Promise.all(
-		steps.map(async (first) => {
-			const done: Array<{ readonly name: string; readonly ok: boolean }> = []
-			for (let step: Step | undefined = first; step; step = step.next) {
-				let ok = true
-				let output = ''
-				if (step.buildInfo) shareBuildInfo(step.buildInfo, 'in')
-				for (const files of batches(step.files ?? [])) {
-					const result = await run(step.command, [...step.args, ...files])
-					ok &&= result.ok
-					output += result.output
-				}
-				if (ok && step.buildInfo) shareBuildInfo(step.buildInfo, 'out')
-				console.log(`\n[check] ${step.name}\n${output.trimEnd()}`)
-				done.push({ name: step.name, ok })
-			}
-			return done
-		}),
-	)
-).flat()
+const results = await Promise.all(
+	steps.map(async (step) => {
+		// vp steps read only the checkout and its installed packages, which `checkout` covers. The
+		// Rust build and tests skip by their own inputs in the dev runner.
+		const key = step.command === 'vp' ? stepKey(step, checkout) : undefined
+		if (key && passed[step.name] === key) {
+			console.log(`\n[check] ${step.name}\npassed already on these files`)
+			return { name: step.name, ok: true, reused: true }
+		}
+		let ok = true
+		let output = ''
+		if (step.buildInfo) shareBuildInfo(step.buildInfo, 'in')
+		for (const files of batches(step.files ?? [])) {
+			const result = await run(step.command, [...step.args, ...files])
+			ok &&= result.ok
+			output += result.output
+		}
+		if (ok && step.buildInfo) shareBuildInfo(step.buildInfo, 'out')
+		console.log(`\n[check] ${step.name}\n${output.trimEnd()}`)
+		if (key) delete passed[step.name]
+		if (key && ok) passed[step.name] = key
+		return { name: step.name, ok, reused: false }
+	}),
+)
+// A file edited while the steps ran may have been read by one, so no pass is kept then.
+if (checkoutHash() === checkout) writePassed(passed)
 console.log('\n[check] summary')
-for (const { name, ok } of results) console.log(`  ${ok ? 'pass' : 'FAIL'}  ${name}`)
+for (const { name, ok, reused } of results) {
+	console.log(`  ${ok ? 'pass' : 'FAIL'}  ${name}${reused ? ' (unchanged)' : ''}`)
+}
 for (const name of failed) console.log(`  FAIL  ${name}`)
 for (const name of skipped) console.log(`  skip  ${name}`)
 if (failed.length > 0 || results.some((result) => !result.ok)) process.exitCode = 1
 
 /**
- * A typecheck's incremental state, shared by every checkout like the Rust build output, so a new
+ * A typecheck's incremental state, shared by every checkout, so a new
  * worktree checks only what differs from the last check anywhere: about 15 seconds instead of 50
  * for the App. TypeScript stores paths relative to the file and checks each source by its content,
  * so any checkout's state is a safe start. `in` seeds a checkout that has none of its own; `out`
@@ -258,6 +269,53 @@ function shareBuildInfo(file: string, direction: 'in' | 'out'): void {
 	} catch {
 		// Another checkout is sharing its own at this moment; this one's check is no slower.
 	}
+}
+
+/**
+ * Every file in the checkout as Git would store it, tracked or not, edited or not, plus what is
+ * installed in `node_modules` and the environment the steps inherit.
+ */
+function checkoutHash(): string {
+	const hash = NodeCrypto.createHash('sha256')
+	hash.update(git(['ls-files', '-s', '-z'])).update('\0')
+	const dirty = [...new Set(git(['ls-files', '-m', '-o', '--exclude-standard', '-z']).split('\0'))]
+		.filter(Boolean)
+		.sort()
+	const present = dirty.filter((file) => NodeFS.existsSync(NodePath.join(root, file)))
+	const blobs = new Map(
+		present.length > 0
+			? git(['hash-object', '--stdin-paths'], present.join('\n'))
+					.split('\n')
+					.map((blob, index) => [present[index]!, blob.trim()] as const)
+			: [],
+	)
+	for (const file of dirty) hash.update(`${file}\0${blobs.get(file) ?? 'deleted'}\0`)
+	const installed = NodePath.join(root, 'node_modules', '.pnpm', 'lock.yaml')
+	hash.update(NodeFS.existsSync(installed) ? NodeFS.readFileSync(installed) : 'none').update('\0')
+	hash.update(JSON.stringify(Object.entries(process.env).sort(([a], [b]) => (a < b ? -1 : 1))))
+	return hash.digest('hex')
+}
+
+function stepKey(step: Step, checkout: string): string {
+	return NodeCrypto.createHash('sha256')
+		.update(JSON.stringify([step.command, step.args, step.files ?? [], checkout]))
+		.digest('hex')
+}
+
+/** Each vp step's key from when it last passed in this checkout. */
+function readPassed(): Record<string, string> {
+	try {
+		return JSON.parse(NodeFS.readFileSync(passedFile, 'utf8'))
+	} catch {
+		return {}
+	}
+}
+
+function writePassed(record: Record<string, string>): void {
+	NodeFS.mkdirSync(NodePath.dirname(passedFile), { recursive: true })
+	const partial = `${passedFile}.${process.pid}.partial`
+	NodeFS.writeFileSync(partial, JSON.stringify(record, null, '\t'))
+	NodeFS.renameSync(partial, passedFile)
 }
 
 /** The root workspace's crates, with folders relative to the checkout. */
@@ -333,9 +391,10 @@ function onPath(command: string): boolean {
 	return NodeChildProcess.spawnSync(finder, [command], { stdio: 'ignore' }).status === 0
 }
 
-function git(args: ReadonlyArray<string>): string {
+function git(args: ReadonlyArray<string>, input?: string): string {
 	const result = NodeChildProcess.spawnSync('git', args, {
 		encoding: 'utf8',
+		input,
 		maxBuffer: 64 * 1024 * 1024,
 	})
 	if (result.status !== 0) throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`)

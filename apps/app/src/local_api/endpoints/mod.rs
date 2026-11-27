@@ -43,7 +43,10 @@ mod tests {
         IdParams,
         accounts::{self, MinecraftAccountParams, ModrinthSignIn},
         boot::{self, Boot, Platform},
-        cores::{self, CoreSessionKey, CoreTarget, NewCoreSession},
+        cores::{
+            self, CoreRoute, CoreSessionKey, CoreTarget, NewCoreSession,
+            Reached,
+        },
         desktop::{
             self, AppFolder, DialogFilter, ExternalLink, JavaAtPath, JavaTest,
             LocalPath, NewShortcut, OpenDialog, SaveDialog, WebviewLog,
@@ -150,6 +153,8 @@ mod tests {
             Boot::decl(&cfg),
             Platform::decl(&cfg),
             CoreTarget::decl(&cfg),
+            CoreRoute::decl(&cfg),
+            Reached::decl(&cfg),
             NewCoreSession::decl(&cfg),
             CoreSessionKey::decl(&cfg),
             LocalFileQuery::decl(&cfg),

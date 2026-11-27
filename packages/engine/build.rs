@@ -58,8 +58,8 @@ fn build_java_jars() {
         out_dir.join("java/libs").display()
     );
 
-    // Cargo reruns this script whenever the java files look newer, which the dev runner's shared
-    // build causes on every engine edit. Gradle takes 10-30 s even with nothing to do.
+    // Cargo reruns this script whenever the java files look newer, as after a checkout or rebase.
+    // Gradle takes 10-30 s even with nothing to do.
     let stamp = out_dir.join("java/inputs.stamp");
     let inputs = java_inputs_hash();
     if out_dir.join("java/libs/theseus.jar").is_file()
