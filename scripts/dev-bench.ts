@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // How fast the dev loop is for an agent in a new worktree, as one score. Each scenario is timed
-// the way an agent waits on it: worktree setup, `up` until the App is usable, and for a change
+// the way an agent waits on it: worktree setup, `dev` until the App is usable, and for a change
 // that would ship, `check:changed`. A scenario scores 100 when it takes its target time, 200 at
 // half of it. The overall score is their harmonic mean, so one slow scenario holds it down: a
 // 20 minute cold start cannot be bought back with a 1 second warm one.
@@ -23,6 +23,7 @@ import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
+import * as NodeReadline from 'node:readline'
 
 /** One-line edits, each made unique per run so no build cache already has them. */
 const EDITS = {
@@ -77,7 +78,7 @@ type Steps = Record<string, number>
 const SCENARIOS = {
 	cold: {
 		target: 600,
-		about: 'new worktree, nothing compiled anywhere: setup, up',
+		about: 'new worktree, nothing compiled anywhere: setup, dev',
 		run: async (bench) => {
 			wipe(NodePath.join(bench.primary, 'target', 'dev'))
 			wipe(NodePath.join(bench.primary, 'target', 'dev-bin'))
@@ -86,27 +87,27 @@ const SCENARIOS = {
 	},
 	ui: {
 		target: 90,
-		about: 'new worktree, one-line App UI and backend edit: setup, up, check',
+		about: 'new worktree, one-line App UI and backend edit: setup, dev, check',
 		run: (bench) => bench.worktree('ui', ['ui']),
 	},
 	app: {
 		target: 180,
-		about: 'new worktree, one-line App Rust edit: setup, up, check',
+		about: 'new worktree, one-line App Rust edit: setup, dev, check',
 		run: (bench) => bench.worktree('app', ['app']),
 	},
 	'app-core': {
 		target: 240,
-		about: 'new worktree, one-line App and Core Rust edit: setup, up, check',
+		about: 'new worktree, one-line App and Core Rust edit: setup, dev, check',
 		run: (bench) => bench.worktree('app-core', ['app', 'core']),
 	},
 	rebuild: {
 		target: 60,
-		about: 'running worktree, another one-line App Rust edit: down, up',
+		about: 'running worktree, another one-line App Rust edit: down, dev',
 		run: (bench) => bench.rebuild(),
 	},
 	parallel: {
 		target: 240,
-		about: 'two new worktrees at once, each a one-line App Rust edit: setup, up (slower one)',
+		about: 'two new worktrees at once, each a one-line App Rust edit: setup, dev (slower one)',
 		run: (bench) => bench.parallel(),
 	},
 	state: {
@@ -116,7 +117,8 @@ const SCENARIOS = {
 	},
 	contracts: {
 		target: 360,
-		about: 'new worktree, one-line contracts edit (everything above it rebuilds): setup, up, check',
+		about:
+			'new worktree, one-line contracts edit (everything above it rebuilds): setup, dev, check',
 		run: (bench) => bench.worktree('contracts', ['contracts']),
 	},
 } satisfies Record<string, Scenario>
@@ -153,7 +155,7 @@ class Bench {
 	}
 
 	/**
-	 * A new worktree with `edits`, through setup and `up`, then `check:changed` unless told not.
+	 * A new worktree with `edits`, through setup and `dev`, then `check:changed` unless told not.
 	 * `after` runs next in the same worktree, and only its steps count.
 	 */
 	async worktree(
@@ -169,7 +171,7 @@ class Bench {
 		try {
 			applyEdits(path, edits)
 			steps.setup = await this.step(name, 'setup', path, ['scripts/setup-worktree.ts'])
-			steps.up = await this.up(name, path)
+			steps.dev = await this.dev(name, path)
 			if (options.check !== false) {
 				steps.check = await this.step(name, 'check', path, [
 					'scripts/check-changed.ts',
@@ -209,7 +211,7 @@ class Bench {
 			after: async (path) => {
 				applyEdits(path, ['app'])
 				const down = await this.step('rebuild', 'down', path, ['scripts/dev-runner.ts', 'down'])
-				return { down, up: await this.up('rebuild', path) }
+				return { down, dev: await this.dev('rebuild', path) }
 			},
 		})
 	}
@@ -243,22 +245,31 @@ class Bench {
 		return total(first!) >= total(second!) ? first! : second!
 	}
 
-	/** `up` again while it reports still starting, as an agent does. */
-	async up(name: string, path: string): Promise<number> {
-		let seconds = 0
-		for (;;) {
-			const started = performance.now()
-			let output: string
-			try {
-				output = await this.exec(name, 'up', path, ['scripts/dev-runner.ts', 'up'])
-			} catch (error) {
-				// The default fixture gives up on a build that outlasts its wait and asks for a rerun.
-				if (!/still being built|did not become ready/.test(String(error))) throw error
-				output = 'Still starting'
+	/**
+	 * Starts the stack as an agent does and times it until it says it is ready. It fails when `dev`
+	 * exits first. `down` stops it.
+	 */
+	async dev(name: string, path: string): Promise<number> {
+		NodeFS.mkdirSync(this.logs, { recursive: true })
+		const log = NodePath.join(this.logs, `${name}.log`)
+		NodeFS.appendFileSync(log, '\n=== dev: node scripts/dev-runner.ts dev --hide-windows\n')
+		const started = performance.now()
+		const child = NodeChildProcess.spawn(
+			this.node,
+			['scripts/dev-runner.ts', 'dev', '--hide-windows'],
+			{ cwd: path, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+		)
+		running.set(path, child)
+		await new Promise<void>((resolve, reject) => {
+			for (const stream of [child.stdout, child.stderr]) {
+				NodeReadline.createInterface({ input: stream }).on('line', (line) => {
+					NodeFS.appendFileSync(log, `${line}\n`)
+					if (line.includes(' · ready')) resolve()
+				})
 			}
-			seconds += (performance.now() - started) / 1000
-			if (!output.includes('Still starting')) return seconds
-		}
+			child.once('close', (code) => reject(new Error(`${name} dev exited ${code}. See ${log}`)))
+		})
+		return (performance.now() - started) / 1000
 	}
 
 	async step(
@@ -332,6 +343,7 @@ class Bench {
 		if (!NodeFS.existsSync(path)) return
 		try {
 			await this.exec(NodePath.basename(path), 'down', path, ['scripts/dev-runner.ts', 'down'])
+			running.delete(path)
 		} catch {
 			// Nothing was running.
 		}
@@ -349,7 +361,32 @@ class Bench {
 	}
 }
 
+/** The `dev` this run started in each worktree and has not stopped yet. */
+const running = new Map<string, NodeChildProcess.ChildProcess>()
+
 async function main(): Promise<void> {
+	// An interrupted run stops the stacks it started, which no terminal holds.
+	for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+		process.once(signal, () => {
+			for (const [path, child] of running) {
+				NodeChildProcess.spawnSync(process.execPath, ['scripts/dev-runner.ts', 'down'], {
+					cwd: path,
+					stdio: 'ignore',
+					windowsHide: true,
+				})
+				// One that has not written its runtime file yet is unknown to `down`.
+				if (child.pid && child.exitCode === null) {
+					if (process.platform === 'win32') {
+						NodeChildProcess.spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+							stdio: 'ignore',
+							windowsHide: true,
+						})
+					} else child.kill('SIGTERM')
+				}
+			}
+			process.exit(130)
+		})
+	}
 	const args = process.argv.slice(2)
 	const requested = args.filter((arg) => arg !== '--full')
 	const unknown = requested.filter((name) => !ORDER.includes(name as ScenarioName))

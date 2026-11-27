@@ -1,16 +1,19 @@
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
+import * as NodeNet from 'node:net'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
+	appLocalAddresses,
 	appTabUrl,
 	createCommandInput,
 	createRuntimeEnvironment,
 	createSharedSpecs,
 	createStackSpecs,
 	findFirstAvailableOffset,
+	fixtureTurn,
 	isBrowserAllowedPort,
 	parseInput,
 	portsForOffset,
@@ -18,7 +21,6 @@ import {
 	readStackShape,
 	seedBuildOutput,
 	resolveStartOffset,
-	sharedLabels,
 	testBuild,
 } from './dev-runner.ts'
 
@@ -33,7 +35,6 @@ describe('dev runner ports', () => {
 		expect(portsForOffset(0)).toEqual({
 			app: 1420,
 			backend: 8787,
-			accountWeb: 3100,
 			core: 16662,
 		})
 	})
@@ -95,7 +96,6 @@ describe('dev runner ports', () => {
 		expect(portsForOffset(offset)).toEqual({
 			app: 1421,
 			backend: 8788,
-			accountWeb: 3101,
 			core: 16663,
 		})
 	})
@@ -125,12 +125,9 @@ describe('dev runner environment', () => {
 })
 
 describe('dev runner programs', () => {
-	it('runs the backend and the frontend beside the stack, and the sign-in website when asked', async () => {
-		expect(sharedLabels()).toEqual(['backend', 'account-web', 'app-frontend'])
-		expect(sharedLabels(false)).toEqual(['backend', 'app-frontend'])
+	it('checks the ports of the frontend, the backend and the first Core', async () => {
 		const checked: number[] = []
 		await findFirstAvailableOffset({
-			accountWeb: false,
 			checkPort: async (port) => {
 				checked.push(port)
 				return true
@@ -168,18 +165,76 @@ describe('dev runner stack', () => {
 		expect(features).toEqual(['engine/export-ts'])
 	})
 
-	it('reads the options a background start passes', () => {
-		expect(parseInput([])).toEqual({ accountWeb: true, held: false, hideWindows: false })
-		expect(parseInput(['--no-account-web', '--hide-windows', '--held'])).toEqual({
-			accountWeb: false,
-			held: true,
+	it('reads the fixture and options of dev', () => {
+		expect(parseInput([])).toEqual({ fixture: undefined, held: false, hideWindows: false })
+		expect(parseInput(['backend', '--hide-windows'])).toEqual({
+			fixture: 'backend',
+			held: false,
 			hideWindows: true,
 		})
+		expect(parseInput(['--held', '--hide-windows'])).toMatchObject({ held: true })
 		expect(() => parseInput(['--nope'])).toThrow('Unknown option --nope')
+		expect(() => parseInput(['default', 'backend'])).toThrow('one fixture')
+		expect(() => parseInput(['--held', 'default'])).toThrow('takes no fixture')
 	})
 
-	it('leaves the Apps and Cores to a fixture', () => {
-		expect(() => parseInput(['2'])).toThrow('A fixture names the Apps and Cores')
+	it('keeps each App at its local address across starts, by name', async () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const file = NodePath.join(scratch, 'local-api.json')
+		const taken = NodeNet.createServer()
+		try {
+			const [alice, bob] = await appLocalAddresses(scratch, ['alice', 'bob'])
+			expect(alice!.port).not.toBe(bob!.port)
+			// Another stack, with the Apps in another order and one more, keeps each name's address.
+			const [carol, bob2, alice2] = await appLocalAddresses(scratch, ['carol', 'bob', 'alice'])
+			expect([bob2, alice2]).toEqual([bob, alice])
+			expect([alice!.port, bob!.port]).not.toContain(carol!.port)
+			// Unusable entries are replaced: a bad port, two Apps on one port, an empty secret.
+			const kept = JSON.parse(NodeFS.readFileSync(file, 'utf8'))
+			kept.alice = { port: 0, secret: alice!.secret }
+			kept.bob = { port: carol!.port, secret: '' }
+			NodeFS.writeFileSync(file, JSON.stringify(kept))
+			const fixed = await appLocalAddresses(scratch, ['carol', 'bob', 'alice'])
+			expect(fixed[0]).toEqual(carol)
+			expect(fixed[1]!.port).not.toBe(carol!.port)
+			expect(fixed[1]!.secret).toMatch(/^[0-9a-f]{64}$/)
+			expect(fixed[2]!.port).toBeGreaterThan(0)
+			expect(fixed[2]!.secret).toBe(alice!.secret)
+			// A kept port something else holds is replaced; the secret stays.
+			await new Promise<void>((resolve) => taken.listen(fixed[0]!.port, '127.0.0.1', resolve))
+			const [moved] = await appLocalAddresses(scratch, ['carol'])
+			expect(moved!.port).not.toBe(fixed[0]!.port)
+			expect(moved!.secret).toBe(carol!.secret)
+		} finally {
+			taken.close()
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
+	})
+
+	it('applies one fixture at a time', async () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const lock = NodePath.join(scratch, 'fixture.lock')
+		try {
+			const first = await fixtureTurn(scratch)
+			let taken = false
+			const second = fixtureTurn(scratch).then((release) => {
+				taken = true
+				return release
+			})
+			// A turn taken at once would have resolved by now.
+			await Promise.resolve()
+			expect(taken).toBe(false)
+			expect(NodeFS.readFileSync(lock, 'utf8')).toBe(String(process.pid))
+			first()
+			;(await second)()
+			expect(NodeFS.existsSync(lock)).toBe(false)
+			// A turn whose holder is gone is taken over.
+			const gone = NodeChildProcess.spawnSync(process.execPath, ['-e', 'process.pid'])
+			NodeFS.writeFileSync(lock, String(gone.pid))
+			;(await fixtureTurn(scratch))()
+		} finally {
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
 	})
 
 	it('reads the stack a fixture wrote', () => {
@@ -261,9 +316,8 @@ describe('dev runner stack', () => {
 		])
 	})
 
-	it('runs the programs a mode shares beside the stack', () => {
+	it('runs the backend and the frontend beside the stack', () => {
 		const specs = createSharedSpecs({
-			accountWeb: false,
 			env: {},
 			paths,
 			ports: portsForOffset(0),

@@ -5,9 +5,9 @@ import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 
 export type Timing = {
-	readonly kind: 'setup' | 'build' | 'test' | 'up' | 'fixture'
+	readonly kind: 'setup' | 'build' | 'test' | 'dev' | 'fixture'
 	readonly worktree: string
-	readonly result: 'ok' | 'failed' | 'cancelled' | 'waiting'
+	readonly result: 'ok' | 'failed' | 'cancelled'
 	/** Milliseconds per step, plus `total`. */
 	readonly ms: Readonly<Record<string, number>>
 	readonly [detail: string]: unknown
