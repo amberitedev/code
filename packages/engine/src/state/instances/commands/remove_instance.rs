@@ -50,3 +50,58 @@ async fn delete_instance_row_and_locks(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::access::BoxFuture;
+    use crate::state::tests::{add_instance, config};
+    use crate::state::{EngineConfig, InstanceHooks};
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    /// Says when a removal enters `removing`, and holds it there until released.
+    #[derive(Default)]
+    struct Gate {
+        entered: Notify,
+        released: Notify,
+    }
+
+    impl InstanceHooks for Gate {
+        fn removing<'a>(
+            &'a self,
+            _engine: &'a Engine,
+        ) -> BoxFuture<'a, Box<dyn Send + 'a>> {
+            Box::pin(async {
+                self.entered.notify_one();
+                self.released.notified().await;
+                Box::new(()) as Box<dyn Send>
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn the_folder_stays_until_the_removing_hook_lets_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let gate = Arc::new(Gate::default());
+        let engine = Engine::new(EngineConfig {
+            hooks: Some(gate.clone()),
+            ..config(dir.path().to_path_buf())
+        })
+        .await
+        .unwrap();
+        add_instance(&engine, "a", "A").await;
+        let folder = engine.directories.instances_dir().join("A");
+        std::fs::create_dir_all(&folder).unwrap();
+
+        let removal = tokio::spawn({
+            let engine = Arc::clone(&engine);
+            async move { remove_instance("a", &engine).await }
+        });
+        gate.entered.notified().await;
+        assert!(folder.exists());
+        gate.released.notify_one();
+        removal.await.unwrap().unwrap();
+        assert!(!folder.exists());
+    }
+}

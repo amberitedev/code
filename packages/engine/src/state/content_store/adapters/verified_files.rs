@@ -171,14 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn edits_with_restored_size_and_write_time_are_rehashed() {
+    fn a_stamp_carries_the_files_change_time() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mod.jar");
+        fs::write(&path, b"content").unwrap();
+        let stamp = FileStamp::read(&File::open(&path).unwrap()).unwrap();
+        assert!(stamp.changed.0 > 0);
+    }
+
+    #[test]
+    fn an_edit_only_the_change_time_shows_is_rehashed() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("mod.jar");
         fs::write(&path, b"original").unwrap();
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
         let cache = VerifiedFiles::default();
         let original = cache.hash(&path, &|_| {}).unwrap();
-        // A fast disk can make the edit within the change time's clock tick of the hash.
+        // Restored size and write time leave the change time, which a fast disk can keep within
+        // one clock tick of the hash: dated earlier, the cached stamp differs only there.
         cache.files.lock().get_mut(&path).unwrap().stamp.changed.0 -= 1;
         let mut file = File::options().write(true).open(&path).unwrap();
         file.write_all(b"modified").unwrap();

@@ -336,7 +336,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn removal_waits_for_a_synced_options_pass_in_flight() {
+    async fn the_removing_hook_waits_for_a_synced_options_pass_in_flight() {
         let dir = tempfile::tempdir().unwrap();
         let engine = offline_engine(dir.path()).await;
 
