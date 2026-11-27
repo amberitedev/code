@@ -930,7 +930,14 @@ async function runTests(
 		if (await runCargo(spec, build, new Set(), build.cargoArgs)) result = 'ok'
 		// An input edited during the run may not be what was tested.
 		if (result === 'ok' && programKey(paths.worktree, build) === key) {
-			writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
+			try {
+				writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
+			} catch (error) {
+				runnerLog(
+					'warning',
+					`${spec.label} passed, but the pass was not recorded: ${String(error)}`,
+				)
+			}
 		}
 		return result === 'ok'
 	} finally {
@@ -1465,8 +1472,12 @@ async function runCargo(
 			windowsHide: true,
 		})
 		builds.add(child)
-		// Cargo can outlive this process when it is killed, and keeps writing.
-		NodeFS.writeFileSync(running, String(child.pid ?? ''))
+		try {
+			// Cargo can outlive this process when it is killed, and keeps writing.
+			NodeFS.writeFileSync(running, String(child.pid ?? ''))
+		} catch {
+			// The marker still names this process, which waits for Cargo below.
+		}
 		// Compiles started by any checkout run behind whatever the person is doing. Windows gives
 		// the compiler processes Cargo starts the same priority.
 		try {
@@ -1486,7 +1497,11 @@ async function runCargo(
 		builds.delete(child)
 		return code === 0
 	} finally {
-		NodeFS.rmSync(running, { force: true })
+		try {
+			NodeFS.rmSync(running, { force: true })
+		} catch {
+			// Held open for a moment, as Windows does: `cargoRunning` removes it later.
+		}
 	}
 }
 
