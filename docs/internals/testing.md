@@ -14,7 +14,7 @@ Rules for writing tests, and for asking for them in review.
 
 ## Waiting for work
 
-- Never wait on sleeps or polling. Await the event that marks the milestone: the Core's event, the op's end, the channel's message. A test that needs a timeout to pass is wrong. Enforced by `amberite/no-wait-in-tests`, and in Rust by `scripts/check-rust-tests.ts`, which allows a sleep on tokio's paused clock.
+- Never wait on sleeps or polling. Await the event that marks the milestone: the Core's event, the op's end, the channel's message. A test that needs a timeout to pass is wrong. State that no event announces, such as what the page shows, is awaited with `expect.poll` or `vi.waitFor`, the only polls allowed. Enforced by `amberite/no-wait-in-tests`, and in Rust by `scripts/check-rust-tests.ts`, which allows tokio's timers on its paused clock.
   - No per-test timeout argument or retry. The project timeout is the ceiling, and flaky tests are fixed, not retried. Enforced by `amberite/no-test-timeout-or-unquarantined-skip`.
   - No `Instant::now()`, `performance.now()` or `Date.now()` deltas. Assert on events and counts, not elapsed time. Enforced by `eslint/no-restricted-properties` in test files, and in Rust by `scripts/check-rust-tests.ts`.
   - `#[ignore]`, `it.skip` and friends need a tracking issue on the line above: `// quarantine: #1234 <why>`. `.only` is never committed. Enforced by `amberite/no-test-timeout-or-unquarantined-skip` and `scripts/check-rust-tests.ts`.
