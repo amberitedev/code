@@ -111,6 +111,8 @@ export type ProgramBuild = {
 	/** The files Cargo writes in `<targetDir>/debug`. */
 	readonly programs: ReadonlyArray<string>
 	readonly targetDir: string
+	/** What the shared record calls this build's output, when it is not the programs' or tests'. */
+	readonly name?: string
 }
 /** `cargo test` of some crates, compiled into the programs' build output the way they are. */
 export type TestBuild = Omit<ProgramBuild, 'programs'> & {
@@ -839,13 +841,22 @@ async function clippyCrates(paths: WorktreePaths, crates: ReadonlyArray<string>)
 		recursive: true,
 	})
 	const spec = { env: { ...process.env, SQLX_OFFLINE: 'true' }, label: 'clippy' }
-	const { cargoArgs: _, programs: __, ...build } = programsBuild(paths, readSharedEnv(paths))
+	const packages = crates.length === 0 ? ['--workspace'] : crates.flatMap((c) => ['--package', c])
+	const linted = crates.length === 0 ? [...known] : crates
+	const build: ProgramBuild = {
+		...programsBuild(paths, readSharedEnv(paths)),
+		cargoArgs: ['clippy', '--locked', ...packages, '--all-targets', '--', '-D', 'warnings'],
+		inputs: [...new Set(linted.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })))],
+		programs: [],
+		// Its own trust record, so another checkout's lint of other content is never taken for this one's.
+		name: `clippy ${packages.join(' ')}`,
+	}
 	const unlock = await lockBuilds(build.cacheDir, spec.label, () => false)
 	if (!unlock) return
 	try {
-		const packages = crates.length === 0 ? ['--workspace'] : crates.flatMap((c) => ['--package', c])
-		const args = ['clippy', '--locked', ...packages, '--all-targets', '--', '-D', 'warnings']
-		if (!(await runCargo(spec, build, new Set(), args))) process.exitCode = 1
+		const key = programKey(paths.worktree, build)
+		const run = await compileShared(paths.worktree, spec, build, new Set(), build.cargoArgs, key)
+		if (!run.compiled) process.exitCode = 1
 	} finally {
 		unlock()
 	}
@@ -1471,9 +1482,10 @@ export function prepareCheckoutCrates(
 	}
 	// Test runs compile the crates they do not test exactly as the programs do.
 	const buildName = (folder: string) =>
-		'tested' in build && (build.tested.includes(folder) || !build.shared.includes(folder))
+		build.name ??
+		('tested' in build && (build.tested.includes(folder) || !build.shared.includes(folder))
 			? `test ${build.tested.join(' ')}`
-			: PROGRAMS
+			: PROGRAMS)
 	const folders = build.inputs.filter((input) =>
 		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
 	)
