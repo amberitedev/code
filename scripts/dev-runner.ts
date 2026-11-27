@@ -841,16 +841,7 @@ async function clippyCrates(paths: WorktreePaths, crates: ReadonlyArray<string>)
 		recursive: true,
 	})
 	const spec = { env: { ...process.env, SQLX_OFFLINE: 'true' }, label: 'clippy' }
-	const packages = crates.length === 0 ? ['--workspace'] : crates.flatMap((c) => ['--package', c])
-	const linted = crates.length === 0 ? [...known] : crates
-	const build: ProgramBuild = {
-		...programsBuild(paths, readSharedEnv(paths)),
-		cargoArgs: ['clippy', '--locked', ...packages, '--all-targets', '--', '-D', 'warnings'],
-		inputs: [...new Set(linted.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })))],
-		programs: [],
-		// Its own trust record, so another checkout's lint of other content is never taken for this one's.
-		name: `clippy ${packages.join(' ')}`,
-	}
+	const build = clippyBuild(paths, readSharedEnv(paths), crates)
 	const unlock = await lockBuilds(build.cacheDir, spec.label, () => false)
 	if (!unlock) return
 	try {
@@ -859,6 +850,52 @@ async function clippyCrates(paths: WorktreePaths, crates: ReadonlyArray<string>)
 		if (!run.compiled) process.exitCode = 1
 	} finally {
 		unlock()
+	}
+}
+
+/** Clippy over `crates`, or the whole workspace, as a build of the shared output. */
+export function clippyBuild(
+	paths: WorktreePaths,
+	env: NodeJS.ProcessEnv,
+	crates: ReadonlyArray<string>,
+): TestBuild {
+	const packages = crates.length === 0 ? ['--workspace'] : crates.flatMap((c) => ['--package', c])
+	const linted =
+		crates.length === 0
+			? [...localCrates(paths.worktree).values()].map((crate) => crate.name)
+			: crates
+	const { programs: _, ...programs } = programsBuild(paths, env)
+	const app = NodePath.relative(
+		NodeFS.realpathSync.native(paths.worktree),
+		[...localCrates(paths.worktree).values()].find((crate) => crate.name === 'amberite-app')!
+			.folder,
+	).replaceAll('\\', '/')
+	const lintsApp = linted.includes('amberite-app')
+	// What configures Clippy, so a checkout with other lint settings never trusts this one's lint.
+	const lints = NodeCrypto.createHash('sha256')
+	for (const file of ['clippy.toml', 'Cargo.toml']) {
+		const text = NodeFS.readFileSync(NodePath.join(paths.worktree, file), 'utf8')
+		lints.update(
+			file === 'clippy.toml'
+				? text
+				: (/^\[workspace\.lints[\s\S]*?(?=^\[(?!workspace\.lints))/m.exec(text)?.[0] ?? ''),
+		)
+	}
+	return {
+		...programs,
+		cargoArgs: ['clippy', '--locked', ...packages, '--all-targets', '--', '-D', 'warnings'],
+		inputs: [
+			...new Set([
+				...(lintsApp ? programInputs(paths, 'amberite-app') : []),
+				...linted.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })),
+			]),
+		],
+		// Files outside every crate count toward the App's crate alone, as in the programs' build, so
+		// each crate is trusted by the same hash in all three kinds of build.
+		programInputs: lintsApp ? { [app]: programs.inputs } : {},
+		shared: programs.inputs,
+		tested: [],
+		name: `clippy ${packages.join(' ')} ${lints.digest('hex').slice(0, 12)}`,
 	}
 }
 

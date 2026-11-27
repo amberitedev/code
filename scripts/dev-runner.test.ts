@@ -361,6 +361,17 @@ describe('dev runner program cache', () => {
 			expect(compiles(here, both)).toBe(2)
 			expect(compiles(here, tests)).toBe(0)
 			expect(compiles(here, program)).toBe(0)
+			// Clippy hashes each crate as the programs do, under its own name, so neither undoes the other.
+			const clippy = { ...both, tested: [], name: 'clippy' }
+			expect(compiles(here, clippy)).toBe(2)
+			expect(compiles(here, program)).toBe(0)
+			expect(compiles(here, both)).toBe(0)
+			expect(compiles(here, clippy)).toBe(0)
+			// Without the App, the files outside every crate still count toward the App alone.
+			const clippyA = { ...tests, tested: [], name: 'clippy a' }
+			expect(compiles(here, clippyA)).toBe(1)
+			expect(compiles(here, tests)).toBe(0)
+			expect(compiles(here, program)).toBe(0)
 			// Compiling other content anywhere ends every build's trust in what it replaced.
 			expect(compiles(there, both)).toBe(1)
 			expect(compiles(here, tests)).toBe(1)
