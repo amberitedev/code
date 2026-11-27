@@ -2660,13 +2660,10 @@ async function sendProgramCommand(
 /** Stops the dev runner recorded in the runtime file, and everything it started. */
 async function down(paths: WorktreePaths): Promise<void> {
 	const runtime = readLiveRuntime(paths)
-	if (!runtime?.pid) {
-		runnerLog('info', 'not running')
-		return
-	}
-	if (!readRunner(paths)) {
+	if (!runtime?.pid || !readRunner(paths)) {
 		// Left by a runner that was killed, and its PID now belongs to something else.
-		writeRuntimeFile(paths, stoppedRuntime(runtime))
+		if (runtime) writeRuntimeFile(paths, stoppedRuntime(runtime))
+		// No apply outlives its runner.
 		NodeFS.rmSync(fixtureLockPath(paths.data), { force: true })
 		runnerLog('info', 'not running')
 		return
