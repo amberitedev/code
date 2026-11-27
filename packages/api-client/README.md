@@ -152,7 +152,7 @@ Uploads use `XMLHttpRequest` for progress tracking and are only available in bro
 
 ```bash
 pnpm --filter @modrinth/api-client build
-pnpm --filter @modrinth/api-client lint
+pnpm --filter @modrinth/api-client typecheck
 # or pnpm prepr:frontend:lib in turborepo root.
 ```
 

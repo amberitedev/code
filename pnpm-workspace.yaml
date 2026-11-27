@@ -13,13 +13,6 @@ autoInstallPeers: true
 publicHoistPattern:
   - 'prettier-plugin-*'
   - '@prettier/plugin-*'
-  - 'eslint'
-  - '@eslint/*'
-  - 'eslint-plugin-*'
-  - '@nuxt/eslint-config'
-  - 'typescript-eslint'
-  - 'vue-eslint-parser'
-  - 'globals'
 peerDependencyRules:
   allowedVersions:
     vite: '8'
