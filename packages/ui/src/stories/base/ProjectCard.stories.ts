@@ -5,6 +5,7 @@ import ProjectCard from '../../components/project/card/ProjectCard.vue'
 const meta = {
 	title: 'Base/ProjectCard',
 	component: ProjectCard,
+	args: { layout: 'grid', title: '' },
 	decorators: [
 		(story) => ({
 			components: { story },

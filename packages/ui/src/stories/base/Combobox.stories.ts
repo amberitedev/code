@@ -28,7 +28,7 @@ export const Default: Story = {
 			{ value: '2', label: 'Option 2' },
 			{ value: '3', label: 'Option 3' },
 		],
-		triggerText: 'Select an option',
+		placeholder: 'Select an option',
 	},
 }
 
@@ -170,7 +170,7 @@ export const DropdownClass: StoryObj = {
 export const Disabled: Story = {
 	args: {
 		options: [{ value: '1', label: 'Option 1' }],
-		triggerText: 'Disabled',
+		placeholder: 'Disabled',
 		disabled: true,
 	},
 }

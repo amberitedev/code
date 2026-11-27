@@ -339,7 +339,9 @@ export const CustomInputContent: Story = {
 			const selectedLabel = () => {
 				if (selected.value.length === 0) return 'All languages'
 				if (selected.value.length === 1) {
-					const option = args.options.find((item) => item.value === selected.value[0])
+					const option = args.options.find(
+						(item) => !('type' in item) && item.value === selected.value[0],
+					)
 					return option?.label ?? '1 selected'
 				}
 				return `${selected.value.length} selected`

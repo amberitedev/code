@@ -1,9 +1,37 @@
+import type { Labrinth } from '@modrinth/api-client'
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 
 import ProjectSidebarDetails from '../../components/project/ProjectSidebarDetails.vue'
 
 const now = new Date()
 const daysAgo = (days: number) => new Date(now.getTime() - days * 86400000).toISOString()
+
+const baseProject: Labrinth.Projects.v2.Project = {
+	id: 'project',
+	slug: 'project',
+	project_type: 'mod',
+	actualProjectType: 'mod',
+	team: 'team',
+	organization: null,
+	title: 'Project',
+	description: '',
+	body: '',
+	published: daysAgo(365),
+	updated: daysAgo(3),
+	status: 'approved',
+	license: { id: 'MIT', name: 'MIT' },
+	client_side: 'required',
+	server_side: 'optional',
+	downloads: 0,
+	followers: 0,
+	categories: [],
+	additional_categories: [],
+	game_versions: [],
+	loaders: [],
+	versions: [],
+	thread_id: 'thread',
+	monetization_status: 'monetized',
+}
 
 const meta = {
 	title: 'Sidebar/ProjectSidebarDetails',
@@ -22,6 +50,7 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {
 	args: {
 		project: {
+			...baseProject,
 			id: 'project-1',
 			published: daysAgo(365),
 			updated: daysAgo(3),
@@ -30,17 +59,18 @@ export const Default: Story = {
 			status: 'approved',
 			license: {
 				id: 'LGPL-3.0-only',
+				name: 'LGPL-3.0-only',
 				url: 'https://www.gnu.org/licenses/lgpl-3.0.html',
 			},
 		},
 		linkTarget: '_blank',
-		hasVersions: true,
 	},
 }
 
 export const AllRightsReserved: Story = {
 	args: {
 		project: {
+			...baseProject,
 			id: 'project-2',
 			published: daysAgo(180),
 			updated: daysAgo(7),
@@ -49,17 +79,18 @@ export const AllRightsReserved: Story = {
 			status: 'approved',
 			license: {
 				id: 'LicenseRef-All-Rights-Reserved',
+				name: 'LicenseRef-All-Rights-Reserved',
 				url: '',
 			},
 		},
 		linkTarget: '_blank',
-		hasVersions: true,
 	},
 }
 
 export const CustomLicense: Story = {
 	args: {
 		project: {
+			...baseProject,
 			id: 'project-3',
 			published: daysAgo(90),
 			updated: daysAgo(1),
@@ -68,17 +99,18 @@ export const CustomLicense: Story = {
 			status: 'approved',
 			license: {
 				id: 'LicenseRef-My-Custom-License',
+				name: 'LicenseRef-My-Custom-License',
 				url: 'https://example.com/license',
 			},
 		},
 		linkTarget: '_blank',
-		hasVersions: true,
 	},
 }
 
 export const Processing: Story = {
 	args: {
 		project: {
+			...baseProject,
 			id: 'project-4',
 			published: daysAgo(2),
 			updated: '',
@@ -87,17 +119,18 @@ export const Processing: Story = {
 			status: 'processing',
 			license: {
 				id: 'MIT',
+				name: 'MIT',
 				url: 'https://opensource.org/licenses/MIT',
 			},
 		},
 		linkTarget: '_blank',
-		hasVersions: false,
 	},
 }
 
 export const HiddenLicense: Story = {
 	args: {
 		project: {
+			...baseProject,
 			id: 'project-5',
 			published: daysAgo(30),
 			updated: daysAgo(5),
@@ -106,11 +139,11 @@ export const HiddenLicense: Story = {
 			status: 'approved',
 			license: {
 				id: 'MIT',
+				name: 'MIT',
 				url: '',
 			},
 		},
 		linkTarget: '_blank',
-		hasVersions: true,
 		hideLicense: true,
 	},
 }

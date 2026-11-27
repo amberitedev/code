@@ -6,6 +6,7 @@ import ColorPicker from '../../components/base/inputs/ColorPicker.vue'
 const meta = {
 	title: 'Inputs/ColorPicker',
 	component: ColorPicker,
+	args: { label: '', modelValue: '#1bd96a' },
 } satisfies Meta<typeof ColorPicker>
 
 export default meta

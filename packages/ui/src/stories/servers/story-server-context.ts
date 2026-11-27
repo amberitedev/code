@@ -7,7 +7,7 @@ import type { CancelUploadHandler, ModrinthServerContext } from '../../providers
 
 /** A running server on a Core that answers nothing, for stories to override. */
 export function storyServerContext(
-	overrides: Partial<ModrinthServerContext> & { server?: Partial<Server> } = {},
+	overrides: Omit<Partial<ModrinthServerContext>, 'server'> & { server?: Partial<Server> } = {},
 ): ModrinthServerContext {
 	const { server, ...rest } = overrides
 	const core = new ContractClient({

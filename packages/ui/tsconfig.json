@@ -4,6 +4,7 @@
 		"paths": {
 			"#ui/*": ["./src/*"],
 			"@modrinth/api-client": ["../api-client/src/index.ts"]
-		}
+		},
+		"lib": ["ESNext", "DOM", "DOM.Iterable"]
 	}
 }

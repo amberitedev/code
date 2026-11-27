@@ -134,7 +134,6 @@ const capeProviderItem: ContentCardTableItem = {
 		id: 'cape-provider',
 		slug: 'cape-provider',
 		title: 'Cape Provider',
-		icon_url: null,
 	},
 	projectLink: '/project/cape-provider',
 	version: {
@@ -155,6 +154,7 @@ const capeProviderItem: ContentCardTableItem = {
 const meta = {
 	title: 'Instances/ContentDependencyWarningModal',
 	component: ContentDependencyWarningModal,
+	args: { itemType: 'mod' },
 	parameters: {
 		layout: 'centered',
 	},

@@ -9,6 +9,7 @@ import { provideLoadingState } from '../../providers/loading-state'
 const meta = {
 	title: 'Base/ReadyTransition',
 	component: ReadyTransition,
+	args: { pending: false },
 } satisfies Meta<typeof ReadyTransition>
 
 export default meta

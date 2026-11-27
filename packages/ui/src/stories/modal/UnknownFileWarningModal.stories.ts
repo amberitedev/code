@@ -7,6 +7,7 @@ import UnknownFileWarningModal from '../../components/modal/UnknownFileWarningMo
 const meta = {
 	title: 'Modal/UnknownFileWarningModal',
 	component: UnknownFileWarningModal,
+	args: { mode: 'mod', fileName: '' },
 	parameters: {
 		layout: 'centered',
 	},

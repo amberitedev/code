@@ -9,6 +9,7 @@ import type { ContentDiffItem } from '../../layouts/shared/installation-settings
 const meta = {
 	title: 'Modal/UpdateToPlayModal',
 	component: ContentDiffModal,
+	args: { header: '', diffs: [] },
 	parameters: {
 		layout: 'centered',
 	},
