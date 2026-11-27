@@ -119,7 +119,10 @@ test('tickets carry the user and the Core, for the owner only', async () => {
 		assert.equal(claims.avatar_url, null)
 		assert.equal(claims.aud, 'core')
 		assert.equal(claims.exp - claims.iat, 300)
-		assert.ok(Number.isInteger(claims.iat) && claims.iat < 2 ** 32, 'iat is in whole seconds')
+		assert.ok(
+			Number.isInteger(claims.iat) && claims.iat > 0 && claims.iat < 2 ** 32,
+			'iat is in whole seconds',
+		)
 		assert.equal(typeof claims.jti, 'string')
 		if (process.env.WRITE_TICKET) {
 			const key = { ...publicKey.export({ format: 'jwk' }), kid }

@@ -274,6 +274,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(store.claims.aud, 'core2')
 		assert.equal(store.claims.root, second.version_hash)
 		assert.equal(store.claims.bytes, bytes([jar, config]))
+		assert.ok(store.claims.iat > 0)
 		assert.equal(store.claims.exp - store.claims.iat, 3600)
 		assert.deepEqual(
 			second.external_files.map(
