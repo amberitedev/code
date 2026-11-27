@@ -1,0 +1,210 @@
+name: CI experiment
+
+# Temporary, deleted before this branch merges. One run that measures where the Rust job's compile
+# time goes, how runner sizes compare, and whether a cached target folder survives a fresh checkout.
+
+on:
+  push:
+    branches: [chore/speed-up-blacksmith-ci]
+    paths: [.github/workflows/ci-experiment.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-experiment
+  cancel-in-progress: true
+
+# The same as ci.yml: the Rust cache key includes these.
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # The job id is part of the Rust cache key, so this must stay `rust` to restore main's cache.
+  rust:
+    name: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: blacksmith-4vcpu-ubuntu-2604
+            apt-flags: ''
+            deep: true
+          - runner: blacksmith-2vcpu-ubuntu-2604
+            apt-flags: '--no-install-recommends'
+            deep: true
+          # No cache exists for ARM, so this one compiles every dependency and stops there.
+          - runner: blacksmith-4vcpu-ubuntu-2604-arm
+            apt-flags: ''
+            deep: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      PACKAGES: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      TEST_ARGS: --workspace --exclude toasty --locked --features amberite-app/export-ts
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Write helper scripts
+        run: |
+          cat > "$RUNNER_TEMP/mtimes.py" <<'EOF'
+          # save: record git's blob hash and the mtime of every tracked file.
+          # restore: give every file whose blob hash is unchanged its recorded mtime back.
+          import json, os, subprocess, sys
+
+          def blobs():
+              out = subprocess.run(["git", "ls-files", "-s", "-z"], capture_output=True, check=True).stdout.decode()
+              for entry in out.split("\0"):
+                  if entry:
+                      meta, path = entry.split("\t", 1)
+                      yield path, meta.split(" ")[1]
+
+          mode, manifest = sys.argv[1], sys.argv[2]
+          if mode == "save":
+              saved = {}
+              for path, blob in blobs():
+                  if os.path.isfile(path) and not os.path.islink(path):
+                      saved[path] = [blob, os.stat(path).st_mtime_ns]
+              with open(manifest, "w") as out:
+                  json.dump(saved, out)
+              print(f"EXP: saved {len(saved)} mtimes")
+          else:
+              with open(manifest) as source:
+                  saved = json.load(source)
+              restored = total = 0
+              for path, blob in blobs():
+                  total += 1
+                  entry = saved.get(path)
+                  if entry and entry[0] == blob and os.path.isfile(path) and not os.path.islink(path):
+                      os.utime(path, ns=(entry[1], entry[1]))
+                      restored += 1
+              print(f"EXP: restored {restored} of {total} mtimes")
+          EOF
+          cat > "$RUNNER_TEMP/build.sh" <<'EOF'
+          # build.sh <label>: compiles the tests, then prints what compiled and how long it took.
+          label=$1
+          start=$(date +%s)
+          if ! cargo test $TEST_ARGS --no-run > "$RUNNER_TEMP/$label.log" 2>&1; then
+            tail -60 "$RUNNER_TEMP/$label.log"
+            exit 1
+          fi
+          grep -E '^\s+(Compiling|Finished)' "$RUNNER_TEMP/$label.log" | sed "s/^/EXP: $label /"
+          echo "EXP: $label seconds=$(( $(date +%s) - start ))"
+          EOF
+          cat > "$RUNNER_TEMP/timings.py" <<'EOF'
+          import json, re, sys
+
+          html = open(sys.argv[1], encoding="utf8").read()
+          units = json.loads(re.search(r"const UNIT_DATA = (\[.*?\]);\s*\n", html, re.S).group(1))
+          print(f"EXP: {len(units)} units compiled")
+          for unit in sorted(units, key=lambda unit: -unit["duration"])[:30]:
+              print(f'EXP: {unit["duration"]:7.1f}s start={unit["start"]:6.1f} {unit["name"]}{unit.get("target", "")} [{unit.get("mode", "")}]')
+          EOF
+
+      - name: Install Tauri dependencies
+        run: |
+          start=$(date +%s)
+          sudo apt-get update
+          echo "EXP: apt update seconds=$(( $(date +%s) - start ))"
+          for flags in "" "--no-install-recommends"; do
+            sudo apt-get install -y $flags --print-uris $PACKAGES \
+              | awk -v flags="$flags" 'substr($0, 1, 1) == "\047" { count++; bytes += $3 } END { printf "EXP: apt download [%s]: %d packages, %.1f MB\n", flags, count, bytes / 1048576 }'
+          done
+          start=$(date +%s)
+          sudo apt-get install -y ${{ matrix.apt-flags }} $PACKAGES
+          echo "EXP: apt install [${{ matrix.apt-flags }}] seconds=$(( $(date +%s) - start ))"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 # v1.16.0
+        with:
+          components: rustfmt
+          cache-save-if: false
+
+      - run: cp -p packages/engine/.env.staging packages/engine/.env
+      - run: mkdir -p apps/app-frontend/dist
+
+      - name: A. Today's compile, with timings
+        run: |
+          start=$(date +%s)
+          if ! cargo test $TEST_ARGS --no-run --timings; then
+            echo "EXP: A FAILED with apt flags [${{ matrix.apt-flags }}], retrying with the full install"
+            sudo apt-get install -y $PACKAGES
+            start=$(date +%s)
+            cargo test $TEST_ARGS --no-run --timings
+          fi
+          echo "EXP: A compile seconds=$(( $(date +%s) - start ))"
+          python3 "$RUNNER_TEMP/timings.py" target/cargo-timings/cargo-timing.html || echo "EXP: could not read the timings"
+          du -sh target target/debug/build target/debug/deps target/debug/incremental 2>/dev/null | sed 's/^/EXP: size /'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: timings-${{ matrix.runner }}
+          path: target/cargo-timings/cargo-timing.html
+          if-no-files-found: warn
+
+      - name: Tests pass without pnpm install
+        if: matrix.deep
+        run: |
+          start=$(date +%s)
+          if cargo test $TEST_ARGS --no-fail-fast > "$RUNNER_TEMP/tests.log" 2>&1; then
+            echo "EXP: tests PASSED without node_modules"
+          else
+            echo "EXP: tests FAILED without node_modules"
+            grep -E "^test .*FAILED|panicked|error" "$RUNNER_TEMP/tests.log" | head -40
+          fi
+          echo "EXP: test run seconds=$(( $(date +%s) - start ))"
+
+      - name: B. A fresh checkout with restored mtimes compiles nothing
+        if: matrix.deep
+        run: |
+          python3 "$RUNNER_TEMP/mtimes.py" save "$RUNNER_TEMP/mtimes.json"
+          # What a new runner sees: every file checked out just now, and the generated inputs made again.
+          git ls-files -z | xargs -0 touch -c
+          rm -rf apps/app-frontend/dist packages/engine/.env
+          start=$(date +%s%N)
+          python3 "$RUNNER_TEMP/mtimes.py" restore "$RUNNER_TEMP/mtimes.json"
+          echo "EXP: mtime restore ms=$(( ($(date +%s%N) - start) / 1000000 ))"
+          cp -p packages/engine/.env.staging packages/engine/.env
+          mkdir -p apps/app-frontend/dist
+          touch -d 2000-01-01 apps/app-frontend/dist
+          start=$(date +%s)
+          cargo test $TEST_ARGS --no-run -v > "$RUNNER_TEMP/b.log" 2>&1 || { tail -40 "$RUNNER_TEMP/b.log"; exit 1; }
+          echo "EXP: B compile seconds=$(( $(date +%s) - start ))"
+          echo "EXP: B recompiled $(grep -cE '^\s+(Compiling|Dirty)' "$RUNNER_TEMP/b.log" || true) units"
+          grep -E '^\s+Dirty' "$RUNNER_TEMP/b.log" | cut -c1-300 | head -20 | sed 's/^/EXP: /' || true
+          grep -E '^\s+Finished' "$RUNNER_TEMP/b.log" | sed 's/^/EXP: /'
+
+      - name: C. One engine edit, without incremental compilation
+        if: matrix.deep
+        run: |
+          printf '\npub fn ci_experiment_probe() -> u32 {\n    41\n}\n' >> packages/engine/src/lib.rs
+          bash "$RUNNER_TEMP/build.sh" C-engine-edit
+
+      - name: D. The same with incremental compilation
+        if: matrix.deep
+        env:
+          CARGO_INCREMENTAL: 1
+        run: |
+          # Every workspace crate compiles once more, this time leaving incremental data behind.
+          git ls-files -z '*.rs' | xargs -0 touch -c
+          bash "$RUNNER_TEMP/build.sh" D0-full-incremental-build
+          du -sh target target/debug/incremental | sed 's/^/EXP: size with incremental /'
+
+          # A new public function: the engine's interface changes, so its dependents recompile.
+          printf '\npub fn ci_experiment_probe_two() -> u32 {\n    1\n}\n' >> packages/engine/src/lib.rs
+          bash "$RUNNER_TEMP/build.sh" D1-engine-interface-edit
+
+          # A changed function body: the interface stays the same.
+          sed -i 's/^    41$/    42/' packages/engine/src/lib.rs
+          bash "$RUNNER_TEMP/build.sh" D2-engine-body-edit
+
+          # An edit in Copal only.
+          printf '\n#[allow(dead_code)]\nfn ci_experiment_probe() -> u32 {\n    7\n}\n' >> apps/core/src/main.rs
+          bash "$RUNNER_TEMP/build.sh" D3-copal-edit
