@@ -126,9 +126,16 @@ const noTestTimeoutOrUnquarantinedSkip = defineRule({
 				}
 				if (!TESTS.has(root!)) return
 				// `test(name, options, fn)`, or `test(name, fn, options)`, where the options may be a
-				// bare timeout. Only an object of focus and skip flags may follow the function.
-				const after = unwrap(second)?.type === 'ObjectExpression' ? [] : node.arguments.slice(2)
-				const flags = new Set(['only', 'skip', 'todo'])
+				// bare timeout. Only an object of flags that set no limit may follow the function.
+				const last = node.arguments.findLastIndex((argument) => {
+					const expression = unwrap(argument)
+					return (
+						expression?.type === 'ArrowFunctionExpression' ||
+						expression?.type === 'FunctionExpression'
+					)
+				})
+				const after = last < 0 ? [] : node.arguments.slice(last + 1)
+				const flags = new Set(['concurrent', 'fails', 'only', 'sequential', 'skip', 'todo'])
 				const limited =
 					option(second, new Set(['retry', 'timeout'])) ||
 					after.some((argument) => {
