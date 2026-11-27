@@ -1253,11 +1253,9 @@ mod tests {
             },
         )
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while servers.phase(server).is_none() && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        assert!(servers.phase(server).is_some(), "the late shim was ignored");
+        servers
+            .until(|servers| servers.phase(server).is_some())
+            .await;
         assert!(matches!(
             servers.start(server).await,
             Err(ServerError::AlreadyRunning)

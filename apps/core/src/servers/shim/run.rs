@@ -542,26 +542,28 @@ mod tests {
     #[test]
     fn a_hold_core_never_releases_runs_out() {
         let saves = Arc::new(SaveHold::default());
-        let (lines, write) = recorder();
-        saves
-            .hold(Duration::from_millis(50), write.clone())
-            .unwrap();
-        std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(*lines.lock().unwrap(), ["save-off", "save-on"]);
+        let (sent, lines) = std::sync::mpsc::channel();
+        let write = move |line: &str| -> std::io::Result<()> {
+            let _ = sent.send(line.to_owned());
+            Ok(())
+        };
+        saves.hold(Duration::ZERO, write.clone()).unwrap();
+        assert_eq!(lines.recv().unwrap(), "save-off");
+        assert_eq!(lines.recv().unwrap(), "save-on");
         // Releasing afterwards sends nothing more.
         saves.release(write).unwrap();
-        assert_eq!(lines.lock().unwrap().len(), 2);
+        assert!(lines.try_recv().is_err());
     }
 
     #[test]
     fn a_second_hold_starts_the_time_again() {
         let saves = Arc::new(SaveHold::default());
         let (lines, write) = recorder();
-        saves
-            .hold(Duration::from_millis(50), write.clone())
-            .unwrap();
         saves.hold(Duration::from_secs(60), write.clone()).unwrap();
-        std::thread::sleep(Duration::from_millis(300));
+        let first = saves.state.lock().unwrap().0;
+        saves.hold(Duration::from_secs(60), write.clone()).unwrap();
+        // The first hold's limit runs out.
+        saves.end(Some(first), &write).unwrap();
         assert_eq!(
             *lines.lock().unwrap(),
             ["save-off", "save-off"],

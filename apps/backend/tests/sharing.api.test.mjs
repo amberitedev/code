@@ -132,15 +132,14 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 			const events = []
 			live.addEventListener('message', (event) => events.push(JSON.parse(event.data)))
 			const told = (share, type = 'shared_instance_users') =>
-				new Promise((resolve, reject) => {
-					const timer = setTimeout(() => reject(new Error(`no ${type} event for ${share}`)), 2000)
+				new Promise((resolve) => {
 					const check = () => {
 						if (
 							events.some(
 								(event) => event.body?.type === type && event.body.shared_instance_id === share,
 							)
 						) {
-							clearTimeout(timer)
+							live.removeEventListener('message', check)
 							resolve()
 						}
 					}
@@ -268,9 +267,9 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		assert.equal(second.download, undefined)
 		assert.equal(second.upload.core.id, 'core2')
 		assert.equal(second.upload.core.cert_fingerprint, 'f'.repeat(64))
-		assert.ok(Date.parse(second.upload.expires) > Date.now() + 3_500_000)
 		const store = decode(second.upload.ticket)
 		assert.ok(store.valid)
+		assert.equal(Date.parse(second.upload.expires), store.claims.exp * 1000)
 		assert.equal(store.claims.kind, 'store')
 		assert.equal(store.claims.aud, 'core2')
 		assert.equal(store.claims.root, second.version_hash)
@@ -556,9 +555,6 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(await push(gone.id, []))
 		await ok(await call(`/instances/${gone.id}/users`, 'POST', { user_ids: ['friend'] }))
 		await ok(await call(`/instances/${gone.id}/invites/pending`, 'POST', undefined, 'mra_friend'))
-		// The invite itself arrives live too; let it land before listening for the deletion.
-		await new Promise((resolve) => setTimeout(resolve, 200))
-		events.length = 0
 		await ok(await call(`/instances/${gone.id}`, 'DELETE'))
 		await told(gone.id)
 
@@ -800,7 +796,7 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 				.status,
 			403,
 		)
-		await new Promise((resolve) => setTimeout(resolve, 200))
+		// Every earlier event came before the version's on this socket, so all have landed.
 		events.length = 0
 		await ok(await call('/servers/core/srv1/players', 'DELETE', { user_ids: ['friend'] }))
 		await told(smp.id)
@@ -818,8 +814,6 @@ test('sharing API as the App and Cores use it, with files in the pool', async ()
 		await ok(
 			await call(`/instances/${closing.id}/invites/pending`, 'POST', undefined, 'mra_friend'),
 		)
-		await new Promise((resolve) => setTimeout(resolve, 200))
-		events.length = 0
 		await ok(await call(`/instances/${closing.id}`, 'DELETE'))
 		await told(closing.id)
 		live.close()

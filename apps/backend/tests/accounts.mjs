@@ -153,7 +153,11 @@ async function connect(token) {
 	url.searchParams.set('code', token)
 	const socket = new WebSocket(url)
 	const messages = []
-	socket.addEventListener('message', (event) => messages.push(JSON.parse(event.data)))
+	const waiting = new Set()
+	socket.addEventListener('message', (event) => {
+		messages.push(JSON.parse(event.data))
+		for (const check of waiting) check()
+	})
 	await new Promise((resolve, reject) => {
 		socket.addEventListener('open', resolve, { once: true })
 		socket.addEventListener('error', () => reject(new Error('Friends socket failed to open')), {
@@ -162,14 +166,17 @@ async function connect(token) {
 	})
 	return {
 		socket,
-		async receive(predicate) {
-			const end = Date.now() + 5000
-			while (Date.now() < end) {
-				const index = messages.findIndex(predicate)
-				if (index >= 0) return messages.splice(index, 1)[0]
-				await new Promise((resolve) => setTimeout(resolve, 25))
-			}
-			throw new Error('Friends socket message timed out')
+		receive(predicate) {
+			return new Promise((resolve) => {
+				const check = () => {
+					const index = messages.findIndex(predicate)
+					if (index < 0) return
+					waiting.delete(check)
+					resolve(messages.splice(index, 1)[0])
+				}
+				waiting.add(check)
+				check()
+			})
 		},
 	}
 }
@@ -208,6 +215,7 @@ for (const char of setup.secret) {
 	}
 }
 const counter = Buffer.alloc(8)
+// oxlint-disable-next-line eslint/no-restricted-properties -- a TOTP code is minted from the clock.
 counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)))
 const hmac = createHmac('sha1', Buffer.from(decoded)).update(counter).digest()
 const code = String((hmac.readUInt32BE(hmac[19] & 15) & 0x7fffffff) % 1000000).padStart(6, '0')

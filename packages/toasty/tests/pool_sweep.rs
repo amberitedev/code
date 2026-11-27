@@ -415,9 +415,9 @@ async fn pre_ping_runs_on_every_checkout() {
 }
 
 /// Lifetime cap: a connection older than `pool_max_connection_lifetime`
-/// is evicted by `recycle` and replaced with a fresh one. Uses real
-/// time because deadpool's `Metrics::age` reads `std::time::Instant`,
-/// which `tokio::time::pause` does not advance.
+/// is evicted by `recycle` and replaced with a fresh one. A zero cap makes
+/// every connection old enough, since deadpool's `Metrics::age` reads
+/// `std::time::Instant`, which `tokio::time::pause` does not advance.
 #[tokio::test]
 async fn lifetime_cap_evicts_aged_connection() {
     let driver = MockDriver::new();
@@ -427,7 +427,7 @@ async fn lifetime_cap_evicts_aged_connection() {
         .models(toasty::models!(User))
         .max_pool_size(1)
         .pool_health_check_interval(None)
-        .pool_max_connection_lifetime(Some(Duration::from_millis(50)))
+        .pool_max_connection_lifetime(Some(Duration::ZERO))
         .build(driver)
         .await
         .unwrap();
@@ -442,9 +442,6 @@ async fn lifetime_cap_evicts_aged_connection() {
     .unwrap();
 
     let connects_before = state.connects.load(Ordering::Relaxed);
-
-    // Real-time wait past the lifetime cap.
-    tokio::time::sleep(Duration::from_millis(150)).await;
 
     toasty::create!(User {
         name: "bob",
@@ -474,7 +471,7 @@ async fn idle_time_cap_evicts_long_idle_connection() {
         .models(toasty::models!(User))
         .max_pool_size(1)
         .pool_health_check_interval(None)
-        .pool_max_connection_idle_time(Some(Duration::from_millis(50)))
+        .pool_max_connection_idle_time(Some(Duration::ZERO))
         .build(driver)
         .await
         .unwrap();
@@ -489,9 +486,6 @@ async fn idle_time_cap_evicts_long_idle_connection() {
     .unwrap();
 
     let connects_before = state.connects.load(Ordering::Relaxed);
-
-    // Real-time wait past the idle cap.
-    tokio::time::sleep(Duration::from_millis(150)).await;
 
     toasty::create!(User {
         name: "bob",

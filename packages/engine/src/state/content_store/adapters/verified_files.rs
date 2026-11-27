@@ -51,11 +51,12 @@ impl FileStamp {
             let mut information = BY_HANDLE_FILE_INFORMATION::default();
             let mut basic = FILE_BASIC_INFO::default();
             unsafe {
-                GetFileInformationByHandle(handle, &mut information).ok()?;
+                GetFileInformationByHandle(handle, &raw mut information)
+                    .ok()?;
                 GetFileInformationByHandleEx(
                     handle,
                     FileBasicInfo,
-                    (&mut basic as *mut FILE_BASIC_INFO).cast(),
+                    (&raw mut basic).cast(),
                     size_of::<FILE_BASIC_INFO>() as u32,
                 )
                 .ok()?;
@@ -177,7 +178,8 @@ mod tests {
         let modified = fs::metadata(&path).unwrap().modified().unwrap();
         let cache = VerifiedFiles::default();
         let original = cache.hash(&path, &|_| {}).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        // A fast disk can make the edit within the change time's clock tick of the hash.
+        cache.files.lock().get_mut(&path).unwrap().stamp.changed.0 -= 1;
         let mut file = File::options().write(true).open(&path).unwrap();
         file.write_all(b"modified").unwrap();
         file.set_modified(modified).unwrap();

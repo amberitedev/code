@@ -4,6 +4,18 @@ import * as NodePath from 'node:path'
 
 import { defineConfig } from 'vite-plus'
 
+// docs/internals/testing.md: a test asserts on events and counts, never on elapsed time.
+const CLOCKS = [
+	['Date', 'now'],
+	['performance', 'now'],
+	['process', 'hrtime'],
+].map(([object, property]) => ({
+	object,
+	property,
+	message: 'Assert on events and counts, not elapsed time.',
+}))
+const TEST_FILES = ['**/*.test.{js,mjs,ts,mts}', '**/*.e2e.ts', 'apps/backend/tests/**']
+
 export default defineConfig({
 	check: {
 		fmt: false,
@@ -81,6 +93,7 @@ export default defineConfig({
 			'**/target/**',
 		],
 		plugins: ['eslint', 'import', 'oxc', 'typescript', 'unicorn'],
+		jsPlugins: ['./scripts/oxlint-plugin.ts'],
 		categories: {
 			correctness: 'warn',
 			perf: 'warn',
@@ -135,6 +148,28 @@ export default defineConfig({
 		},
 		overrides: [
 			{
+				files: TEST_FILES,
+				rules: {
+					'amberite/no-test-timeout-or-unquarantined-skip': 'error',
+					'amberite/no-wait-in-tests': 'error',
+					'eslint/no-restricted-properties': ['error', ...CLOCKS],
+				},
+			},
+			{
+				files: ['packages/fixtures/scenarios/*.e2e.ts'],
+				rules: {
+					'eslint/no-restricted-properties': [
+						'error',
+						...CLOCKS,
+						...['act', 'assert'].map((property) => ({
+							object: 'agent',
+							property,
+							message: 'A scenario runs with no model; assert with expect on what the page shows.',
+						})),
+					],
+				},
+			},
+			{
 				files: ['apps/app-frontend/src/**'],
 				excludeFiles: ['apps/app-frontend/src/platform/window.ts'],
 				rules: {
@@ -180,8 +215,6 @@ export default defineConfig({
 			{
 				// Typecheck has no checkJs, so this is what catches a removed export these upstream .js files import.
 				files: ['apps/app-frontend/src/**/*.js'],
-				// Oxlint misses the implicit default export of a <script setup> SFC.
-				excludeFiles: ['apps/app-frontend/src/pages/project/index.js'],
 				rules: {
 					'import/named': 'error',
 				},

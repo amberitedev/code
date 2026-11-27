@@ -173,23 +173,19 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
             Arc::new(tokio::sync::Notify::new()),
         )),
         consoles: Arc::default(),
-        ops: Default::default(),
+        ops: crate::api::ops::Ops::default(),
         db,
     });
     let router = api::router(Arc::clone(&state));
     let owner = accounts::current_id().unwrap();
     let socket = paths.clone();
-    tokio::spawn(async move {
+    let mut serving = Box::pin(async move {
         crate::access::local::serve(&socket, &owner, router).await
     });
-    let client = Client::at(paths);
-    for _ in 0..50 {
-        if client.is_up().await {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    (dir, state, client)
+    // The first poll binds the socket, then waits for a connection.
+    assert!(futures::poll!(serving.as_mut()).is_pending());
+    tokio::spawn(serving);
+    (dir, state, Client::at(paths))
 }
 
 #[tokio::test]
