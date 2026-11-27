@@ -10,9 +10,7 @@
 //! owner's devices are introduced on (see `link`).
 
 use std::{
-    future::Future,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    pin::Pin,
     sync::Arc,
     time::Duration,
 };
@@ -179,35 +177,28 @@ pub async fn run(sync: Arc<Sync>) {
             tokio::time::sleep(backoff(1)).await;
             continue;
         };
-        // The link retries on its own, so an owed call the backend keeps failing does not keep
-        // the owner's devices from being introduced.
-        let link = link::hold(&sync, &key);
-        tokio::pin!(link);
-        sync.serve(&key, &addresses, link).await;
+        // The link runs beside owed calls and retries on its own, so a call the backend keeps
+        // failing does not keep the owner's devices from being introduced. Either one ending
+        // means the backend removed this Core.
+        tokio::select! {
+            () = sync.serve(&key, &addresses) => {}
+            () = link::hold(&sync, &key) => {}
+        }
         sync.unpair().await;
     }
 }
 
 impl Sync {
     /// Report this Core's state, then send owed calls as they come, reconnecting with backoff
-    /// whenever the backend is lost, until it says this Core was removed. `link` ending means
-    /// that too.
-    async fn serve(
-        &self,
-        key: &str,
-        addresses: &watch::Receiver<Addresses>,
-        mut link: Pin<&mut impl Future<Output = ()>>,
-    ) {
+    /// whenever the backend is lost, until it says this Core was removed.
+    async fn serve(&self, key: &str, addresses: &watch::Receiver<Addresses>) {
         let mut failures = 0;
         loop {
             let lost = match self.connect(key, addresses).await {
                 Ok(()) => {
                     failures = 0;
                     info!("connected to the backend");
-                    tokio::select! {
-                        lost = self.serve_owed(key, addresses) => lost,
-                        () = link.as_mut() => return,
-                    }
+                    self.serve_owed(key, addresses).await
                 }
                 Err(lost) => lost,
             };
@@ -217,10 +208,7 @@ impl Sync {
             failures += 1;
             let wait = backoff(failures);
             warn!(%problem, "lost the backend, reconnecting in {}s", wait.as_secs());
-            tokio::select! {
-                () = tokio::time::sleep(wait) => {}
-                () = link.as_mut() => return,
-            }
+            tokio::time::sleep(wait).await;
         }
     }
 

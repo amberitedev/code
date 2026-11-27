@@ -13,8 +13,6 @@ const LOOPBACK: SocketAddr =
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
 /// Long enough for a handshake on loopback, which takes milliseconds.
 const SOON: Duration = Duration::from_secs(5);
-/// How long a dial that must fail is given. QUIC sends its first packet at once.
-const NEVER: Duration = Duration::from_millis(300);
 
 fn listener(gate: Gate) -> (Endpoint, SocketAddr) {
     let endpoint = Endpoint::listener(
@@ -40,14 +38,9 @@ async fn only_an_introduced_dialer_reaches_a_listener() {
 
     let core_id = core.id();
 
-    // Nobody introduced the dialer: its packets are dropped unanswered.
-    let stranger = app.dial(core_id, &[address], API, NEVER).await;
-    assert_eq!(stranger.err(), Some(NoPath));
-
     core.expect(app.id(), &app.candidates(&[]).await);
     let serving = tokio::spawn(async move {
-        // Only the introduced dialer is kept. The stranger's abandoned attempt may still say
-        // goodbye, now that its address is let in.
+        // Only the introduced dialer is kept.
         let connection = loop {
             let incoming = core.accept().await.unwrap();
             if let Ok(connection) = incoming.accept().await {

@@ -348,3 +348,28 @@ impl AsyncUdpSocket for Socket {
         self.inner.may_fragment()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tls::Identity;
+
+    #[tokio::test]
+    async fn quic_reaches_a_listener_only_from_addresses_let_in() {
+        let quic = [0xC0];
+        let stranger: SocketAddr =
+            (Ipv4Addr::new(203, 0, 113, 9), 40000).into();
+        let home: SocketAddr = (Ipv4Addr::new(192, 168, 1, 5), 40000).into();
+        let bind = (Ipv4Addr::LOCALHOST, 0).into();
+
+        let introduced = Socket::bind(bind, Some(Gate::Introduced)).unwrap();
+        assert!(!introduced.for_quic(&quic, stranger));
+        assert!(!introduced.for_quic(&quic, home));
+        introduced.admit(Identity::generate().unwrap().id(), [stranger.ip()]);
+        assert!(introduced.for_quic(&quic, stranger));
+
+        let local = Socket::bind(bind, Some(Gate::IntroducedOrLocal)).unwrap();
+        assert!(local.for_quic(&quic, home));
+        assert!(!local.for_quic(&quic, stranger));
+    }
+}

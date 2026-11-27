@@ -108,9 +108,10 @@ up a Core on this PC"), so the App never needs its own server code.
 
 - **Hosting lock.** A row on the backend: who hosts, since when. Taking it is a compare-and-set, so
   two friends can never fork the world. Two writes per session. A host that disappears loses it
-  after a timeout, and the lock fences it: the host renews its lease while it runs the world and
-  stops the world when a renewal fails, and the timeout is longer than the renewal interval, so
-  the old host has stopped before anyone else can take the lock.
+  after a timeout, and the host fences itself by its own clock: it renews its lease while it runs
+  the world, and stops the world once its last confirmed renewal is older than the timeout minus a
+  margin, so a renewal that hangs or fails cannot leave it running after the backend gives the
+  lock away.
 - **Versions.** When a session ends, the host snapshots the world as content-addressed files.
   Region files change a few at a time, so most of a hand-off is already on the next host.
 - **Moving it.** Over `world/1` from whoever has the newest version and is online.
