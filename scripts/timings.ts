@@ -60,7 +60,11 @@ export function takeCargoTimings(targetDir: string): CargoTimings | undefined {
 	} catch {
 		return undefined
 	} finally {
-		NodeFS.rmSync(folder, { force: true, recursive: true })
+		try {
+			NodeFS.rmSync(folder, { force: true, recursive: true })
+		} catch {
+			// Held open, as Windows does: the next build removes it.
+		}
 	}
 }
 
