@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// `vp run scenarios:prove <scenario> [--base <ref>] [--upload-command <command>]`: runs one scenario on this checkout as it is
-// and on the commit it branched from, and says whether it fails there and passes here.
+// `vp run scenarios:prove <scenario> [options]`: runs one scenario on this checkout as it is and on
+// the commit it branched from, says whether it fails there and passes here, and can post that on a
+// pull request.
 // See docs/internals/testing.md#scenarios.
 //
 // Exits 0 when proven, 1 when not, 2 when the scenario could not run (the App did not run, or the
@@ -128,6 +129,81 @@ export function upload(command: string, captures: ReadonlyArray<string>): Map<st
 	return new Map(captures.map((capture, index) => [capture, urls[index]!]))
 }
 
+/**
+ * The proof as a pull request comment reads it: what was shown as its headline, one sentence on
+ * what was tried, and each capture beside the one base took under the same name. A run that
+ * proved nothing gets its verdict and what each side did, for whoever ran it.
+ */
+export function renderProof(input: {
+	readonly title: string
+	/** What was tried and what base did wrong, in a user's words. */
+	readonly what?: string
+	readonly result: { readonly text: string; readonly exit: number }
+	readonly base: Side | undefined
+	readonly head: Side
+	readonly baseName: string
+	/** Where a capture's Markdown points: an uploaded URL, or a path beside the proof. */
+	readonly link: (capture: string) => string
+}): string {
+	const { base, head, baseName, link } = input
+	const headline = `### ${input.title.charAt(0).toUpperCase()}${input.title.slice(1)}`
+	if (input.result.exit !== 0) {
+		const line = (name: string, side: Side | undefined) =>
+			`- ${name}: ${side ? `${side.status}${side.message ? `, ${side.message.replaceAll(/\s+/g, ' ')}` : ''}` : 'not run'}`
+		return [
+			headline,
+			'',
+			`**${input.result.text}**`,
+			'',
+			line('Base', base),
+			line('This checkout', head),
+			'',
+		].join('\n')
+	}
+	// Base also has the capture e2e takes when a test fails, which nothing here pairs with.
+	const before = new Map(base?.captures.map((capture) => [NodePath.basename(capture), capture]))
+	const rows = head.captures.map((capture) => {
+		const pair = before.get(NodePath.basename(capture))
+		return `| ${pair ? `![Before](${link(pair)})` : ''} | ![After](${link(capture)}) |`
+	})
+	return [
+		headline,
+		'',
+		input.what ??
+			`Ran this on \`${baseName}\` and on this branch. It fails on \`${baseName}\` and passes here.`,
+		'',
+		...(rows.length > 0 ? ['| Before | After |', '| --- | --- |', ...rows, ''] : []),
+	].join('\n')
+}
+
+/**
+ * Posts the proof on a pull request through `gh`, which uploads the captures the proof names by
+ * path. An agent posts it from the developer's account, so the last line says who did.
+ */
+export function postComment(
+	pullRequest: string,
+	out: string,
+	proof: string,
+	by: string | undefined,
+) {
+	const gh = (args: ReadonlyArray<string>) =>
+		NodeChildProcess.spawnSync('gh', args, { cwd: out, encoding: 'utf8', windowsHide: true })
+	const login = gh(['api', 'user', '--jq', '.login']).stdout.trim()
+	const body = `${proof}\n<sub>🤖 ${by ?? 'An agent'} on behalf of ${login || 'the developer'}, from \`vp run scenarios:prove\`</sub>\n`
+	NodeFS.writeFileSync(NodePath.join(out, 'proof.md'), body)
+	const captures = [...proof.matchAll(/\]\((\.\/[^)]+)\)/g)].map(([, path]) => path!)
+	const posted = gh([
+		'pr',
+		'comment',
+		pullRequest,
+		'--body-file',
+		'proof.md',
+		...captures.flatMap((capture) => ['--attach', capture]),
+	])
+	if (posted.status === 0) console.log(`Posted: ${posted.stdout.trim()}`)
+	else console.error(`Could not post the proof: ${posted.stderr.trim() || posted.stdout.trim()}`)
+}
+
 function git(args: ReadonlyArray<string>, cwd: string): string {
 	return NodeChildProcess.execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
 }
@@ -145,13 +221,16 @@ async function main(): Promise<void> {
 		options: {
 			base: { type: 'string', default: 'origin/main' },
 			'upload-command': { type: 'string' },
+			what: { type: 'string' },
+			comment: { type: 'string' },
+			by: { type: 'string' },
 		},
 	})
 	const scenario = positionals[0]
 	const baseRef = values.base
 	if (!scenario || positionals.length > 1) {
 		throw new Error(
-			'Usage: vp run scenarios:prove <scenario file> [--base <ref>] [--upload-command <command>]',
+			'Usage: vp run scenarios:prove <scenario file> [--base <ref>] [--what <sentence>] [--comment <pull request>] [--by <model>] [--upload-command <command>]',
 		)
 	}
 	const head = git(['rev-parse', '--show-toplevel'], process.cwd())
@@ -230,30 +309,27 @@ async function main(): Promise<void> {
 	const links = uploadCommand
 		? upload(uploadCommand, [...(baseSide?.captures ?? []), ...headSide.captures])
 		: new Map<string, string>()
-	const row = (name: string, side: Side | undefined) => {
-		if (!side) return `| ${name} | not run | |`
-		const message = side.message?.replaceAll(/\r?\n/g, ' ').replaceAll('|', '\\|')
-		// Uploaded, or relative to the proof, so its Markdown shows them wherever the folder is opened.
-		const captures = side.captures.map(
-			(capture) =>
-				`![${name}](${links.get(capture) ?? NodePath.relative(out, capture).split(NodePath.sep).join('/')})`,
-		)
-		return `| ${name} | ${side.status}${message ? `: ${message}` : ''} | ${captures.join(' ')} |`
-	}
-	const proof = [
-		`### Scenario: ${headSide.title || baseSide?.title || scenario}`,
-		'',
-		`**${result.text}**`,
-		'',
-		'| | Result | Captures |',
-		'| --- | --- | --- |',
-		row('Base', baseSide),
-		row('This checkout', headSide),
-		'',
-	].join('\n')
+	// Uploaded, or relative to the proof, so its Markdown shows them wherever the folder is opened.
+	const link = (capture: string) =>
+		links.get(capture) ?? `./${NodePath.relative(out, capture).split(NodePath.sep).join('/')}`
+	const proof = renderProof({
+		title: headSide.title || baseSide?.title || scenario,
+		what: values.what,
+		result,
+		base: baseSide,
+		head: headSide,
+		baseName: baseRef.replace(/^origin\//, ''),
+		link,
+	})
 	NodeFS.mkdirSync(out, { recursive: true })
 	NodeFS.writeFileSync(NodePath.join(out, 'proof.md'), proof)
 	console.log(`\n${proof}`)
+	// For whoever ran this, to see that base failed for the bug and not beside it.
+	if (baseSide?.message) console.log(`Base: ${baseSide.message.replaceAll(/\s+/g, ' ')}`)
+	if (values.comment) {
+		if (result.exit === 0) postComment(values.comment, out, proof, values.by)
+		else console.error('Not posted: there is no proof to show.')
+	}
 	process.exitCode = result.exit
 }
 

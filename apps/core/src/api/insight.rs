@@ -134,6 +134,6 @@ pub async fn machine(
             .map_or(1, |cpus| u32::try_from(cpus.get()).unwrap_or(u32::MAX)),
         assigned_mb,
         warning,
-        api_reachability: state.network.report(forward::CORE).map(Into::into),
+        store_reachability: state.network.report(forward::CORE).map(Into::into),
     }))
 }

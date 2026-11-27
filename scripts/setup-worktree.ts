@@ -51,7 +51,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
 const installed = timed('install', installDependencies)
 
 try {
-	if (!samePath(worktree, primary)) copyEnvFile()
+	copyEnvFile()
 } catch (thrown) {
 	// A failed copy must not hide the install result, or stop the install from finishing.
 	error = thrown instanceof Error ? thrown.message : String(thrown)
@@ -65,12 +65,17 @@ console.log(
 	process.exitCode ? '[setup] failed. Fix the error above, then run: vp run setup' : '[setup] done',
 )
 
-// A copy, not a link: Windows only allows symlinks with Developer Mode or elevation.
+// A copy, not a link: Windows only allows symlinks with Developer Mode or elevation. The primary
+// checkout gets one too, when it has none.
 function copyEnvFile(): void {
 	// A primary checkout still on main keeps the engine at its old path.
-	const from = [ENV_FILE, NodePath.join('packages', 'app-lib', '.env')]
-		.map((file) => NodePath.join(primary, file))
-		.find((file) => NodeFS.existsSync(file))
+	const from = [
+		...[ENV_FILE, NodePath.join('packages', 'app-lib', '.env')].map((file) =>
+			NodePath.join(primary, file),
+		),
+		// What CI builds the dev programs with. A checkout with other settings compiles its own.
+		NodePath.join(worktree, `${ENV_FILE}.prod`),
+	].find((file) => NodeFS.existsSync(file))
 	const to = NodePath.join(worktree, ENV_FILE)
 	if (from === undefined || NodeFS.existsSync(to)) return
 	NodeFS.copyFileSync(from, to)
@@ -164,12 +169,4 @@ function git(args: ReadonlyArray<string>, cwd: string): string {
 	const result = NodeChildProcess.spawnSync('git', args, { cwd, encoding: 'utf8' })
 	if (result.status !== 0) throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`)
 	return result.stdout.trim()
-}
-
-function samePath(left: string, right: string): boolean {
-	const normalize = (path: string) => {
-		const resolved = NodePath.resolve(path)
-		return process.platform === 'win32' ? resolved.toLowerCase() : resolved
-	}
-	return normalize(left) === normalize(right)
 }

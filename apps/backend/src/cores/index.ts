@@ -15,6 +15,7 @@ import { ApiError, invalid, objectBody, stringField, unauthorized } from '../com
 import { type Route, noBody, route } from '../common/router'
 import type { Env } from '../common/types'
 import { forgetServer, sweepFiles } from '../sharing'
+import { introduce, parseDialer } from './link'
 import { waitForApproval } from './sign-in'
 import { MAX_REPORT_BODY, parseStorageReport, reportStorage } from './storage'
 import { issueTicket } from './tickets'
@@ -24,7 +25,8 @@ import { issueTicket } from './tickets'
 // answer. The owner enters the code in the App, which approves it with their session; from then
 // on the key works and the Core is listed under that account. The App never talks to the Core
 // during sign-in and the account session never leaves the App. After that the backend only
-// keeps the account's list of Cores and their addresses. A Core reports its state on start and on
+// keeps the account's list of Cores and their addresses, and introduces the owner's devices to
+// them (`link.ts`). A Core reports its state on start and on
 // change, never on a timer, and a report that changes nothing writes nothing: D1 writes are the
 // free tier's scarcest resource. Only a Core's owner is told where it is or gets tickets for it.
 
@@ -395,6 +397,14 @@ export async function requireListedCore(request: Request, env: Env): Promise<Cal
 	return core
 }
 
+/** Core, signed in: the WebSocket it is introduced to dialers on (`link.ts`). */
+async function linkCore(request: Request, env: Env): Promise<Response> {
+	if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
+		return new Response('WebSocket required', { status: 426 })
+	const core = await requireListedCore(request, env)
+	return env.CORE_LINK.getByName(core.id).fetch(request)
+}
+
 function parseForgottenServer(raw: unknown): ForgottenServer {
 	const body = objectBody(raw)
 	return {
@@ -423,14 +433,21 @@ async function removeCore(request: Request, env: Env, id: string) {
 		.bind(id, user.id)
 		.run()
 	if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
-	const shares = (
-		await env.DB.prepare(
-			'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
-		)
-			.bind(id, user.id)
-			.all<{ id: string }>()
-	).results
-	for (const share of shares) await sweepFiles(env, share.id)
+	try {
+		const shares = (
+			await env.DB.prepare(
+				'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
+			)
+				.bind(id, user.id)
+				.all<{ id: string }>()
+		).results
+		for (const share of shares) await sweepFiles(env, share.id)
+	} finally {
+		// Without it the Core learns on its next call to the backend.
+		await env.CORE_LINK.getByName(id)
+			.unlink()
+			.catch((error: unknown) => console.warn('could not drop the link of a removed Core', error))
+	}
 }
 
 export const coreRoutes: Route[] = [
@@ -467,6 +484,10 @@ export const coreRoutes: Route[] = [
 	route(cores.ListCores, noBody, ({ request, env }) => listCores(request, env)),
 	route(cores.IssueTicket, noBody, ({ request, env, params }) =>
 		issueTicket(request, env, params.id),
+	),
+	route(cores.LinkCore, noBody, ({ request, env }) => linkCore(request, env)),
+	route(cores.Introduce, parseDialer, ({ request, env, params, body }) =>
+		introduce(request, env, params.id, body),
 	),
 	route(cores.RemoveCore, noBody, ({ request, env, params }) =>
 		removeCore(request, env, params.id),
