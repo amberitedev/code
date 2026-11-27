@@ -267,8 +267,9 @@ lists the other commands.
 Setup, every Rust build and test run, every `up`, and every applied fixture append one JSON line to
 the primary checkout's `.data/timings.jsonl`, shared by all checkouts. Each line has `kind`
 (`setup`, `build`, `test`, `up`, `fixture`), the worktree, the result, and milliseconds per step:
-`install` for setup, `lockWait` and `compile` plus the number of repo crates compiled again for a
-build, the same plus `test` and the tested crates for a test run, and the wait until ready for
+`install` for setup, `lookup` (asking for a download), `lockWait` and `compile` plus the number of
+repo crates compiled again for a build, or `download` alone when CI's programs were fetched, the
+same plus `test` and the tested crates for a test run, and the wait until ready for
 `up` and `fixture`. It records what happened, under whatever else the machine was doing.
 
 To check whether a change to the dev setup made it faster, run `node scripts/dev-bench.ts`. It

@@ -1329,12 +1329,27 @@ async function buildProgram(
 	const complete = (key: string) =>
 		build.programs.every((program) => NodeFS.existsSync(NodePath.join(cached(key), program)))
 	let key = initialKey
+	// The shared build output is <primary>/target/dev-shared.
+	const primary = NodePath.resolve(build.targetDir, '..', '..')
+	const asked = performance.now()
 	if (complete(key)) {
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
 	} else if (await downloadPrograms(worktree, build, key, builds, stopped)) {
 		runnerLog('info', `${spec.label} downloaded ${cached(key)}, built by CI`)
+		const download = Math.round(performance.now() - asked)
+		recordTiming(primary, {
+			kind: 'build',
+			worktree,
+			program: build.programs.join(' '),
+			key,
+			result: 'ok',
+			changedCrates: 0,
+			ms: { download, total: download },
+		})
 	} else {
 		const started = performance.now()
+		// Looking for a download that was not there, before compiling.
+		const lookup = started - asked
 		// A stop that ended a download must not go on to compile.
 		if (stopped()) return undefined
 		const unlock = await lockBuilds(cache, spec.label, stopped)
@@ -1366,8 +1381,7 @@ async function buildProgram(
 		} finally {
 			unlock()
 			const total = performance.now() - started
-			// The shared build output is <primary>/target/dev-shared.
-			recordTiming(NodePath.resolve(build.targetDir, '..', '..'), {
+			recordTiming(primary, {
 				kind: 'build',
 				worktree,
 				program: build.programs.join(' '),
@@ -1376,9 +1390,10 @@ async function buildProgram(
 				// Crates in the repo compiled again; third-party crates are not counted.
 				changedCrates,
 				ms: {
+					lookup: Math.round(lookup),
 					lockWait: Math.round(lockWait),
 					compile: Math.round(total - lockWait),
-					total: Math.round(total),
+					total: Math.round(lookup + total),
 				},
 			})
 		}
