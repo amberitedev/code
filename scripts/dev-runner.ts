@@ -940,7 +940,8 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
  */
 async function buildPrograms(paths: WorktreePaths, args: ReadonlyArray<string>): Promise<void> {
 	if (args.length === 1 && args[0] === '--artifact') return buildProgramsOnce(paths, true)
-	const named = (flag: string) => args.filter((_, index) => index % 2 === 1 && args[index - 1] === flag)
+	const named = (flag: string) =>
+		args.filter((_, index) => index % 2 === 1 && args[index - 1] === flag)
 	if (
 		args.length % 2 === 1 ||
 		args.some((arg, index) => index % 2 === 0 && arg !== '--clippy' && arg !== '--test')

@@ -47,7 +47,7 @@
 		"@crowdin/crowdin-api-client": "^1.60.0",
 		"@formatjs/icu-messageformat-parser": "^3.5.23",
 		"@modrinth/tooling-config": "workspace:*",
-		"@oxlint/plugins": "1.90.0",
+		"@oxlint/plugins": "1.94.0",
 		"@tailwindcss/container-queries": "^0.1.1",
 		"@types/node": "^24",
 		"@typescript-eslint/typescript-estree": "^8.74.0",
