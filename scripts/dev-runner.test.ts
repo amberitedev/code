@@ -160,6 +160,14 @@ describe('dev runner stack', () => {
 		)
 	})
 
+	it("turns on only the tested crates' TypeScript, so the others stay as the programs compile them", () => {
+		const { cargoArgs } = testBuild(paths, {}, ['engine', 'copal'])
+		const features = cargoArgs.flatMap((arg, index) =>
+			cargoArgs[index - 1] === '--features' ? [arg] : [],
+		)
+		expect(features).toEqual(['engine/export-ts'])
+	})
+
 	it('reads the options a background start passes', () => {
 		expect(parseInput([])).toEqual({ accountWeb: true, held: false, hideWindows: false })
 		expect(parseInput(['--no-account-web', '--hide-windows', '--held'])).toEqual({

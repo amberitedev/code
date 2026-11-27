@@ -37,6 +37,9 @@ const BUILD_LOCK_STALE_MS = 60 * 60_000
 const BUILD_LOCK = 'building'
 // In the shared build output: each repo crate's content when last compiled, and for which programs.
 const BUILT_CRATES = 'built-crates.json'
+// In the shared build output: the latest test runs that passed, by everything that went into them.
+const PASSED_TESTS = 'passed-tests.json'
+const PASSED_TEST_RUNS = 200
 // In the shared build output's record: a crate's output as the programs compile it.
 const PROGRAMS = 'programs'
 // Given to an unchanged crate's files so Cargo trusts its compiled output.
@@ -377,7 +380,7 @@ async function main(): Promise<void> {
 		return
 	}
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
-	if (command === 'build') return buildPrograms(paths)
+	if (command === 'build') return buildPrograms(paths, commandArgs)
 	if (command === 'test') return testCrates(paths, commandArgs)
 	if (command !== 'dev') {
 		throw new DevRunnerError(
@@ -784,10 +787,26 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 }
 
 /**
- * `build`: compiles the App and Core for this checkout's current Rust without starting anything,
- * so a later `up` finds them ready. Worktree setup runs it in the background.
+ * `build [--test <crate>]...`: compiles the App and Core for this checkout's current Rust without
+ * starting anything, so a later `up` finds them ready. Worktree setup runs it in the background.
+ * With `--test`, the crates are tested after it, failed or not, in the same build turn, so no
+ * other checkout's build comes between and replaces what the tests reuse.
  */
-async function buildPrograms(paths: WorktreePaths): Promise<void> {
+async function buildPrograms(paths: WorktreePaths, args: ReadonlyArray<string>): Promise<void> {
+	const tests = args.filter((_, index) => index % 2 === 1)
+	if (args.some((arg, index) => index % 2 === 0 && arg !== '--test') || args.length % 2 === 1) {
+		throw new DevRunnerError('build takes only `--test <crate>` pairs.')
+	}
+	keepBuildTurn = tests.length > 0
+	try {
+		await buildProgramsOnce(paths)
+		if (tests.length > 0) await testCrates(paths, tests)
+	} finally {
+		keptBuildTurn?.()
+	}
+}
+
+async function buildProgramsOnce(paths: WorktreePaths): Promise<void> {
 	const ports = portsForOffset(0)
 	const specs = createStackSpecs({
 		// Only the builds are used, so no App ever gets this address.
@@ -853,12 +872,15 @@ export function testBuild(
 			...crates.flatMap((crate) => (PROGRAM_PACKAGES.includes(crate) ? [] : ['--package', crate])),
 			'--no-default-features',
 			...tested.flatMap((crate) =>
-				crate.hasDefault && crate.name !== 'amberite-app'
+				crate.features.includes('default') && crate.name !== 'amberite-app'
 					? ['--features', `${crate.name}/default`]
 					: [],
 			),
-			// The App's tests check its generated TypeScript, as in CI.
-			...(crates.includes('amberite-app') ? ['--features', 'amberite-app/export-ts'] : []),
+			// Their tests check their generated TypeScript, as in CI, where the App's feature turns
+			// it on for every crate. Only the tested crates take it, so the rest stay as compiled.
+			...tested.flatMap((crate) =>
+				crate.features.includes('export-ts') ? ['--features', `${crate.name}/export-ts`] : [],
+			),
 			// Cargo takes `--lib` once, for every selected package.
 			...(targets.includes('--lib') ? ['--lib'] : []),
 			...targets.filter((target) => target !== '--lib'),
@@ -884,6 +906,34 @@ async function runTests(
 ): Promise<boolean> {
 	const spec = { env, label: `test ${crates.join(' ')}` }
 	const started = performance.now()
+	let key = programKey(paths.worktree, build)
+	// The tests see this environment too, so a pass counts for it alone.
+	const passKey = (programs: string) =>
+		NodeCrypto.createHash('sha256')
+			.update(programs)
+			.update(JSON.stringify(Object.entries(env).sort(([a], [b]) => (a < b ? -1 : 1))))
+			.digest('hex')
+			.slice(0, 20)
+	const passedFile = NodePath.join(build.targetDir, PASSED_TESTS)
+	const passed = (): ReadonlyArray<string> => {
+		try {
+			return JSON.parse(NodeFS.readFileSync(passedFile, 'utf8'))
+		} catch {
+			return []
+		}
+	}
+	if (passed().includes(passKey(key))) {
+		runnerLog('info', `${spec.label} passed already with these inputs (${passKey(key)})`)
+		recordTiming(paths.primary, {
+			kind: 'test',
+			worktree: paths.worktree,
+			crates,
+			result: 'ok',
+			passedBefore: true,
+			ms: { total: Math.round(performance.now() - started) },
+		})
+		return true
+	}
 	const unlock = await lockBuilds(build.cacheDir, spec.label, () => false)
 	if (!unlock) return false
 	const lockWait = performance.now() - started
@@ -891,7 +941,6 @@ async function runTests(
 	let changedCrates = 0
 	let result: 'ok' | 'failed' = 'failed'
 	try {
-		let key = programKey(paths.worktree, build)
 		for (;;) {
 			const run = await compileShared(
 				paths.worktree,
@@ -912,6 +961,8 @@ async function runTests(
 		// Cargo compiles what was edited since `--no-run` again, which the record does not describe.
 		if (programKey(paths.worktree, build) !== key) {
 			NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
+		} else if (result === 'ok') {
+			writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
 		}
 		return result === 'ok'
 	} finally {
@@ -1162,9 +1213,9 @@ type LocalCrate = {
 	readonly dependencies: ReadonlyArray<string>
 	/** Folders of the local crates only its tests, examples and benchmarks build with. */
 	readonly devDependencies: ReadonlyArray<string>
+	/** The features it declares. */
+	readonly features: ReadonlyArray<string>
 	readonly folder: string
-	/** Whether it declares a `default` feature. */
-	readonly hasDefault: boolean
 	readonly name: string
 	/** Cargo target flags that select its tests: its library, programs and integration tests. */
 	readonly testTargets: ReadonlyArray<string>
@@ -1199,8 +1250,8 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 			crates.set(folder, {
 				dependencies: local(false),
 				devDependencies: local(true),
+				features: Object.keys(crate.features),
 				folder,
-				hasDefault: 'default' in crate.features,
 				name: crate.name,
 				testTargets: crate.targets.flatMap((target) =>
 					target.kind.includes('lib')
@@ -1625,6 +1676,10 @@ function cargoEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	return rest
 }
 
+/** Set by `build --test`: the first turn this process takes is kept until `keptBuildTurn` ends it. */
+let keepBuildTurn = false
+let keptBuildTurn: (() => void) | undefined
+
 /**
  * One build at a time across every checkout, or gives up with `undefined` once the runner is
  * stopping. Checkouts that share a build output need it: Cargo puts the finished program at the
@@ -1635,6 +1690,7 @@ async function lockBuilds(
 	label: string,
 	stopped: () => boolean,
 ): Promise<(() => void) | undefined> {
+	if (keptBuildTurn) return () => {}
 	NodeFS.mkdirSync(cache, { recursive: true })
 	const lock = NodePath.join(cache, BUILD_LOCK)
 	const owner = NodePath.join(lock, 'pid')
@@ -1665,7 +1721,10 @@ async function lockBuilds(
 		if (stopped()) return undefined
 	}
 	NodeFS.writeFileSync(owner, String(process.pid))
-	return () => NodeFS.rmSync(lock, { recursive: true, force: true })
+	const unlock = () => NodeFS.rmSync(lock, { recursive: true, force: true })
+	if (!keepBuildTurn) return unlock
+	keptBuildTurn = unlock
+	return () => {}
 }
 
 /** Numbered by place in the stack, so the same folder serves whatever a fixture names its App. */
