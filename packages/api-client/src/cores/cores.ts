@@ -1,3 +1,4 @@
+import type { CoreRoute } from '@amberite/contracts/app'
 import type { Endpoint } from '@amberite/contracts/protocol'
 import { cores, type ListedCore } from '@amberite/contracts/backend'
 import { type CoreSession, core as coreRoutes, type Server } from '@amberite/contracts/core'
@@ -8,22 +9,28 @@ import type { AbstractModrinthClient } from '../core/abstract-client'
 import { READY_MS } from '../events/event-stream'
 import type { CoreCallError, CoreSessions } from '../types/client'
 
-/** How long a Core's local address may take to answer before its internet address is used. */
-const LOCAL_ANSWER_MS = 2500
 /** How long the Core list is kept after an unreachable Core last caused it to be fetched again. */
 const FAILURE_REFETCH_MS = 60_000
+/**
+ * How long a Core the backend could not introduce this device to is left alone: this long after
+ * the first failure and twice as long after each next one, up to `MAX_INTRODUCE_WAIT_MS`. Every
+ * try is a request the backend pays for, and an App left open next to a Core that is off would
+ * keep asking.
+ */
+const FIRST_INTRODUCE_WAIT_MS = 15_000
+const MAX_INTRODUCE_WAIT_MS = 10 * 60_000
 
-/** What is needed to reach a Core: its addresses and the certificate to trust there. */
-type CoreLocation = Pick<ListedCore, 'id' | 'address' | 'cert_fingerprint'> &
-	Partial<Pick<ListedCore, 'public_address'>>
+/** What is needed to reach a Core: its own address and the certificate to trust there. */
+type CoreLocation = Pick<ListedCore, 'id' | 'address' | 'cert_fingerprint'>
 
-/** Where requests to a Core go (`base`), and the Core address that reaches (`address`). */
-type Route = { base: string; address: string }
+/** Where requests to a Core go (`base`), and how the Core is reached, null while it is not. */
+type Route = Pick<CoreRoute, 'base' | 'reached'>
 
 /**
- * The account's own Cores. The backend keeps the list and each Core's address; hosting calls go to
- * a Core directly, with this device's session there (see `signIn`). Several Cores are treated as
- * one: their servers form one list, and a request for a server is sent to the Core that has it.
+ * The account's own Cores. The backend keeps the list and introduces this device to each Core;
+ * hosting calls then go to a Core directly, with this device's session there (see `signIn`).
+ * Several Cores are treated as one: their servers form one list, and a request for a server is
+ * sent to the Core that has it.
  *
  * The App never contacts a Core before it is listed. Fetch the list again with `list` after it
  * changes, such as when a Core is approved.
@@ -36,26 +43,35 @@ export class Cores {
 	private listed: ListedCore[] = []
 	/** Core id to where its requests go. See `route`. */
 	private routes = new Map<string, Route>()
+	/** Core id to its connection started by the last list, settled once it is made or failed. */
+	private routing = new Map<string, Promise<void>>()
 	/** Server id to the id of the Core that has it. */
 	private serverCores = new Map<string, string>()
 	/** Sign-ins in flight, by Core id, so requests that fail together sign in once. */
 	private signingIn = new Map<string, Promise<CoreSession>>()
+	/** Connections being made, by Core id, so requests that fail together connect once. */
+	private connecting = new Map<string, Promise<Route>>()
+	/** Cores the backend could not introduce: how often in a row, and when it is asked again. */
+	private unreached = new Map<string, { failures: number; retryAt: number }>()
 
 	constructor(private readonly client: AbstractModrinthClient) {}
 
 	/**
-	 * Fetch the account's Cores from the backend. A Core whose route cannot be worked out keeps its
-	 * plain address, so it does not take the other Cores down with it.
+	 * Fetch the account's Cores from the backend and start connecting to each. Requests to a Core
+	 * wait for its own connection only, so one that takes long holds up nobody else.
 	 */
 	public list(): Promise<ListedCore[]> {
-		const listing = this.client.backend.call(cores.ListCores).then(async (list) => {
-			const settled = await Promise.allSettled(list.map((core) => this.route(core)))
-			this.routes = new Map(
-				list.map((core, index) => {
-					const result = settled[index]
-					const plain = { base: core.address, address: core.address }
-					return [core.id, result.status === 'fulfilled' ? result.value : plain]
-				}),
+		const listing = this.client.backend.call(cores.ListCores).then((list) => {
+			this.routing = new Map(
+				list.map((core) => [
+					core.id,
+					this.route(core).then(
+						(route) => {
+							this.routes.set(core.id, route)
+						},
+						() => undefined,
+					),
+				]),
 			)
 			this.listed = list
 			return list
@@ -94,6 +110,8 @@ export class Cores {
 			if (coreId === core.id) this.serverCores.delete(serverId)
 		}
 		this.routes.delete(core.id)
+		this.routing.delete(core.id)
+		this.unreached.delete(core.id)
 		this.listed = this.listed.filter((listed) => listed.id !== core.id)
 		this.cores = null
 		this.client.forgetCore(core.id)
@@ -192,11 +210,18 @@ export class Cores {
 			if (!fingerprint)
 				throw new ApiCallError(400, 'unsupported', 'This Core does not serve HTTPS yet')
 			const ticket = await this.ticket(core.id)
-			return this.sessions()
-				.signIn(core.id, this.address(core), fingerprint, ticket)
-				.catch((error: unknown) => {
-					throw coreError(error)
-				})
+			const signIn = () =>
+				this.sessions()
+					.signIn(core.id, fingerprint, ticket)
+					.catch((error: unknown) => {
+						throw coreError(error)
+					})
+			return signIn().catch(async (error: unknown) => {
+				// Nothing reached a Core the App had no connection to, so the ticket is unused.
+				const offline = error instanceof ApiCallError && error.code === 'core_offline'
+				if (offline && (await this.reconnect(core.id))) return signIn()
+				throw error
+			})
 		})().finally(() => this.signingIn.delete(core.id))
 		this.signingIn.set(core.id, signing)
 		return signing
@@ -230,27 +255,34 @@ export class Cores {
 
 	/** The base URL requests to a listed Core go to. */
 	public async url(coreId: string): Promise<string> {
-		return this.base(await this.core(coreId))
-	}
-
-	/** The address of a Core its requests reach: its local or its internet address. */
-	public address(core: ListedCore): string {
-		return this.routes.get(core.id)?.address ?? core.address
+		const core = await this.core(coreId)
+		await this.routing.get(core.id)
+		return this.routes.get(core.id)?.base ?? core.address
 	}
 
 	/**
-	 * Where this App joins a server. When its Core answers at the Core's own network address, the
-	 * App is on that network (or the Core has no router in front of it), so it joins at that address
-	 * and the server's game port: owners at home then do not depend on their router taking its own
-	 * internet address back in (NAT loopback). Otherwise it is where players join from the internet.
-	 * Pass the result to `getHostingServerAddress`; show and copy the plain `net`, which is what
-	 * everyone else joins.
+	 * Connect again to a Core whose requests are answered `core_offline`: nothing was sent, so the
+	 * caller sends again when this is true. The backend is asked again only after a wait (see
+	 * `connect`).
+	 */
+	public async reconnect(coreId: string): Promise<boolean> {
+		const route = await this.route(await this.core(coreId))
+		this.routes.set(coreId, route)
+		return route.reached !== null
+	}
+
+	/**
+	 * Where this App joins a server. When its Core is reached on this computer's own network, the
+	 * App joins at the Core's address there and the server's game port: owners at home then do not
+	 * depend on their router taking its own internet address back in (NAT loopback). Otherwise it
+	 * is where players join from the internet. Pass the result to `getHostingServerAddress`; show
+	 * and copy the plain `net`, which is what everyone else joins.
 	 */
 	public joinNet(server: Pick<Server, 'server_id' | 'net'>) {
 		const { net } = server
 		const coreId = this.serverCores.get(server.server_id)
 		const core = this.listed.find((candidate) => candidate.id === coreId)
-		if (!core || this.address(core) !== core.address) return net
+		if (!core || this.routes.get(core.id)?.reached !== 'local') return net
 		const ip = new URL(core.address).hostname.replace(/^\[|\]$/g, '')
 		return { ...net, ip, port: net.game_port }
 	}
@@ -278,7 +310,7 @@ export class Cores {
 			}
 		})
 		const failure = results.find((result) => result.status === 'rejected')
-		// A Core that did not answer may have moved or changed its certificate: ask the backend again.
+		// A Core that did not answer may have changed its certificate: ask the backend again.
 		if (failure && Date.now() - this.droppedAfterFailureAt >= FAILURE_REFETCH_MS) {
 			this.droppedAfterFailureAt = Date.now()
 			this.cores = null
@@ -318,44 +350,45 @@ export class Cores {
 		return this.cores ?? this.list()
 	}
 
-	private base(core: ListedCore): string {
-		return this.routes.get(core.id)?.base ?? core.address
+	/** Connect to a Core and answer where its requests go. Calls made together connect once. */
+	private route(core: CoreLocation): Promise<Route> {
+		const pending = this.connecting.get(core.id)
+		if (pending) return pending
+		const connecting = this.connect(core).finally(() => this.connecting.delete(core.id))
+		this.connecting.set(core.id, connecting)
+		return connecting
 	}
 
 	/**
-	 * Work out where requests to a Core go. Its local address is used when it answers, which is the
-	 * case at home; otherwise its address on the internet. An HTTPS address goes through
-	 * `connectCore`, which trusts only that Core's certificate and signs requests with this
-	 * device's session there.
+	 * Connect to a Core through `connectCore`, which trusts only that Core's certificate and signs
+	 * requests with this device's session there. A Core on this computer's network answers at its
+	 * own address, with the backend left out. Any other answers only devices the backend introduced,
+	 * so the platform says what to introduce, the backend passes it to the Core and answers with
+	 * where the Core is, and the platform connects there. Without `connectCore` a Core is reached
+	 * at its address directly.
 	 */
-	private async route(core: CoreLocation): Promise<Route> {
+	private async connect(core: CoreLocation): Promise<Route> {
 		const connect = this.client.connectCore
-		const open = async (address: string): Promise<Route> => ({
-			address,
-			base:
-				connect && core.cert_fingerprint && address.startsWith('https:')
-					? await connect(core.id, address, core.cert_fingerprint)
-					: address,
-		})
-		const local = await open(core.address)
-		if (!core.public_address) return local
-		const answered = await Promise.race([
-			this.client
-				.request('', {
-					api: local.base,
-					version: 'health',
-					method: 'GET',
-					skipAuth: true,
-					retry: false,
-					circuitBreaker: false,
-				})
-				.then(
-					() => true,
-					() => false,
-				),
-			new Promise<false>((resolve) => setTimeout(() => resolve(false), LOCAL_ANSWER_MS)),
-		])
-		return answered ? local : open(core.public_address)
+		if (!connect || !core.cert_fingerprint) return { base: core.address, reached: null }
+		let route = await connect(core.id, core.address, core.cert_fingerprint)
+		const waiting = this.unreached.get(core.id)
+		// Only the backend's part waits: dialing a Core on this network costs it nothing.
+		const mayAsk = !waiting || Date.now() >= waiting.retryAt
+		const dialer = !route.reached && mayAsk ? route.dialer : null
+		if (dialer) {
+			const listener = await this.client.backend
+				.call(cores.Introduce, { params: { id: core.id }, body: dialer })
+				.catch(() => null)
+			if (listener)
+				route = await connect(core.id, core.address, core.cert_fingerprint, listener.candidates)
+		}
+		if (route.reached) this.unreached.delete(core.id)
+		else if (dialer) {
+			const failures = (waiting?.failures ?? 0) + 1
+			const wait = Math.min(FIRST_INTRODUCE_WAIT_MS * 2 ** (failures - 1), MAX_INTRODUCE_WAIT_MS)
+			this.unreached.set(core.id, { failures, retryAt: Date.now() + wait })
+		}
+		return { base: route.base, reached: route.reached }
 	}
 }
 

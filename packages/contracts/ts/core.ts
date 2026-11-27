@@ -561,9 +561,10 @@ assigned_mb: number,
  */
 warning: string | null, 
 /**
- * Whether the App can reach the Core's API from the internet.
+ * Whether the Core's store can be reached from the internet, on the Core's TCP port. The
+ * App reaches the API over Connect and does not need that port.
  */
-api_reachability: ReachabilityReport | null, };
+store_reachability: ReachabilityReport | null, };
 
 export type ReachabilityReport = { state: Reach, 
 /**

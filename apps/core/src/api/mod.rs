@@ -1,5 +1,5 @@
-//! The HTTP API: Axum routes, one file per resource. The same router serves HTTPS and the local
-//! socket (see `access::local`).
+//! The HTTP API: Axum routes, one file per resource. The same router serves Connect (see
+//! `network::connect`), HTTPS and the local socket (see `access::local`).
 //!
 //! Routes only a Core has are `contracts::core` Endpoints, in Modrinth Hosting's shapes. A server's
 //! content, share, files, icon and logs are the engine's routes (`engine_mount`).

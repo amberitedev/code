@@ -164,8 +164,9 @@ pub struct Machine {
     pub assigned_mb: i64,
     /// Set when the servers together may use more than the machine has.
     pub warning: Option<String>,
-    /// Whether the App can reach the Core's API from the internet.
-    pub api_reachability: Option<ReachabilityReport>,
+    /// Whether the Core's store can be reached from the internet, on the Core's TCP port. The
+    /// App reaches the API over Connect and does not need that port.
+    pub store_reachability: Option<ReachabilityReport>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
