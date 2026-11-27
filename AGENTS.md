@@ -53,8 +53,8 @@ The most common defect in this repo is a change that works on the path you teste
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
 - Setup runs in the background. While `.data/setup.json` says `running` and its PID is alive, wait for it and do not run `vp i`. It ends as `done` or `failed` (with the error). After a failure, or with no file, run `vp i` yourself.
-- Whoever starts a stack holds it, and it stops when they do. Start yours as a background task with `vp run dev --hide-windows`, or `vp run dev <fixture> --hide-windows` to seed it. It prints each App's `tab:` URL when it is ready. The first build takes minutes.
-- `vp run fixture <name>` replaces the running stack's data. `vp run status` prints the tab URLs; they stay the same across fixtures and restarts.
+- Whoever starts a stack holds it, and it stops when they do. Start yours as a background task with `vp run dev --hide-windows`, or `vp run dev <fixture> --hide-windows` to seed it, then run `vp run status --wait`: it returns once the stack is ready and prints each App's `tab:` URL, or fails saying why. The first build takes minutes.
+- `vp run fixture <name>` replaces the running stack's data and waits until it is ready. Tab URLs stay the same across fixtures and restarts.
 - Nothing rebuilds Rust for you. After a Rust edit, run `vp run rs <name>`.
 - Stop your stack when you finish by stopping its task, or with `vp run down`. Never kill a process by name or path: other worktrees run stacks too.
 - Do not leave a stack running for the developer. Tell them which fixture shows the change, as `vp run dev <fixture>`.

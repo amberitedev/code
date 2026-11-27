@@ -152,6 +152,11 @@ export type RuntimeFile = {
 	readonly dataDir: string
 	/** A process whose Rust build failed. A fixture stops waiting when it sees one. */
 	buildFailed?: string
+	/**
+	 * Set until the runner has built the programs and started its first stack, or applied its first
+	 * fixture: until then the stack has nothing to be ready with.
+	 */
+	starting?: boolean
 	readonly ports: DevPorts
 	/** Every program by label, such as `backend`, `core:1` and `app:2`. */
 	programs: Record<string, ProgramState>
@@ -444,6 +449,7 @@ async function main(): Promise<void> {
 
 	const runtime: RuntimeFile = {
 		pid: process.pid,
+		starting: true,
 		branch,
 		dataDir: paths.data,
 		ports,
@@ -772,6 +778,13 @@ async function main(): Promise<void> {
 			result: 'ok',
 			ms: { total: Math.round(performance.now() - begun) },
 		})
+		await startDone()
+	}
+	/** The first start is done: the stack can be ready now. */
+	const startDone = async () => {
+		if (stopping) return
+		runtime.starting = undefined
+		save()
 		await printStatus(paths)
 	}
 
@@ -786,9 +799,9 @@ async function main(): Promise<void> {
 				.catch((error: unknown) => fail(error instanceof Error ? error.message : String(error)))
 		} else {
 			runnerLog('info', 'Backend, Cores and Apps wait for a fixture.')
-			if (fixture && (await runFromRunner(paths, ['fixture', fixture], builds)) !== 0) {
-				fail(`The ${fixture} fixture did not apply, so the stack cannot become ready.`)
-			}
+			if (!fixture) await startDone()
+			else if ((await runFromRunner(paths, ['fixture', fixture], builds)) === 0) await startDone()
+			else fail(`The ${fixture} fixture did not apply, so the stack cannot become ready.`)
 		}
 		await finished
 	} finally {
@@ -2322,7 +2335,7 @@ async function printStatus(paths: WorktreePaths): Promise<boolean> {
 	let ready = false
 	let pageError: string | undefined
 	try {
-		ready = await runtimeIsReady(runtime)
+		ready = !runtime.starting && (await runtimeIsReady(runtime))
 	} catch (error) {
 		if (!(error instanceof PageError)) throw error
 		pageError = error.message
@@ -2355,8 +2368,17 @@ async function waitUntilReady(paths: WorktreePaths): Promise<void> {
 		if (Date.now() > deadline) throw new DevRunnerError(NOT_RUNNING)
 		await new Promise((resolve) => setTimeout(resolve, 500))
 	}
+	const stack = connectStack(paths)
 	try {
-		await connectStack(paths).ready()
+		const deadline = Date.now() + READY_WAIT_MS
+		for (;;) {
+			// The runner rewrites its file as it works, so one read can come back empty.
+			const current = stack.runner.runtime()
+			if (current && !current.starting) break
+			if (Date.now() > deadline) throw new StillStarting('The stack is still starting.')
+			await new Promise((resolve) => setTimeout(resolve, 500))
+		}
+		await stack.ready()
 	} catch (error) {
 		if (!(error instanceof StillStarting)) throw error
 		runnerLog('warning', `${error.message} Run vp run status --wait again to keep waiting.`)
@@ -2367,8 +2389,8 @@ async function waitUntilReady(paths: WorktreePaths): Promise<void> {
  * Waits until no other fixture is being applied to this checkout's stack, then holds the turn
  * until the returned function is called: two applies at once would replace each other's data.
  */
-async function fixtureTurn(paths: WorktreePaths): Promise<() => void> {
-	const lock = NodePath.join(paths.data, 'fixture.lock')
+export async function fixtureTurn(data: string): Promise<() => void> {
+	const lock = NodePath.join(data, 'fixture.lock')
 	let told = false
 	for (;;) {
 		try {
@@ -2505,7 +2527,7 @@ async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
 		process.exitCode = 1
 		return
 	}
-	const release = await fixtureTurn(paths)
+	const release = await fixtureTurn(paths.data)
 	const waitStarted = performance.now()
 	const record = (result: 'ok' | 'failed') =>
 		recordTiming(paths.primary, {
@@ -2528,7 +2550,8 @@ async function applyFixture(paths: WorktreePaths, name: string): Promise<void> {
 		release()
 	}
 	record('ok')
-	await printStatus(paths)
+	// A stack's first fixture: its runner prints this once it has taken the fixture as applied.
+	if (!readLiveRuntime(paths)?.starting) await printStatus(paths)
 	if (stack.live.apps.length > 0) {
 		runnerLog('info', 'Tabs keep their URLs. Reload an open one to see the new data.')
 	}

@@ -13,6 +13,7 @@ import {
 	createSharedSpecs,
 	createStackSpecs,
 	findFirstAvailableOffset,
+	fixtureTurn,
 	isBrowserAllowedPort,
 	parseInput,
 	portsForOffset,
@@ -198,6 +199,25 @@ describe('dev runner stack', () => {
 			expect(moved!.secret).toBe(carol!.secret)
 		} finally {
 			taken.close()
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
+	})
+
+	it('applies one fixture at a time', async () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const lock = NodePath.join(scratch, 'fixture.lock')
+		try {
+			const first = await fixtureTurn(scratch)
+			const second = fixtureTurn(scratch)
+			expect(NodeFS.readFileSync(lock, 'utf8')).toBe(String(process.pid))
+			first()
+			;(await second)()
+			expect(NodeFS.existsSync(lock)).toBe(false)
+			// A turn whose holder is gone is taken over.
+			const gone = NodeChildProcess.spawnSync(process.execPath, ['-e', 'process.pid'])
+			NodeFS.writeFileSync(lock, String(gone.pid))
+			;(await fixtureTurn(scratch))()
+		} finally {
 			NodeFS.rmSync(scratch, { force: true, recursive: true })
 		}
 	})

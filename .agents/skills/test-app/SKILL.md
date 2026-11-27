@@ -11,9 +11,9 @@ it unavailable. Do not install or switch to another automation system.
 ## Start the app
 
 Reuse this task's stack: `vp run status` prints each App's `tab:` URL. Otherwise start one as a
-background task from the repository root with `vp run dev <fixture> --hide-windows`. It runs on
-this checkout's ignored `.data` and prints the URLs when it is ready. The bare frontend URL reaches
-no App.
+background task from the repository root with `vp run dev <fixture> --hide-windows`, then run
+`vp run status --wait`, which returns with the URLs once the stack on this checkout's ignored
+`.data` is ready. The bare frontend URL reaches no App.
 
 Test with meaningful state. Describe the state that lets you test the scenario you want as a
 [fixture](../../../docs/internals/fixtures.md) and apply it with `vp run fixture <name>`, rather
