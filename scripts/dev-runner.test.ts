@@ -14,9 +14,9 @@ import {
 	isBrowserAllowedPort,
 	parseInput,
 	portsForOffset,
-	prepareCheckoutCrates,
 	programKey,
 	readStackShape,
+	seedBuildOutput,
 	resolveStartOffset,
 	sharedLabels,
 	testBuild,
@@ -160,6 +160,14 @@ describe('dev runner stack', () => {
 		)
 	})
 
+	it("turns on only the tested crates' TypeScript, so the others stay as the programs compile them", () => {
+		const { cargoArgs } = testBuild(paths, {}, ['engine', 'copal'])
+		const features = cargoArgs.flatMap((arg, index) =>
+			cargoArgs[index - 1] === '--features' ? [arg] : [],
+		)
+		expect(features).toEqual(['engine/export-ts'])
+	})
+
 	it('reads the options a background start passes', () => {
 		expect(parseInput([])).toEqual({ accountWeb: true, held: false, hideWindows: false })
 		expect(parseInput(['--no-account-web', '--hide-windows', '--held'])).toEqual({
@@ -285,121 +293,52 @@ describe('dev runner program cache', () => {
 		expect(programKey(process.cwd(), { ...build, cargoArgs: ['build', '--release'] })).not.toBe(key)
 	})
 
-	/** Checkouts of a two-crate workspace sharing one build output, and the builds they run. */
-	const sharedBuilds = (scratch: string) => {
-		const library = (checkout: string) => NodePath.join(checkout, 'packages', 'a', 'src', 'lib.rs')
-		const checkout = (name: string) => {
-			const dir = NodePath.join(scratch, name)
-			for (const crate of ['app', 'a']) {
-				NodeFS.mkdirSync(NodePath.join(dir, 'packages', crate, 'src'), { recursive: true })
-				NodeFS.writeFileSync(NodePath.join(dir, 'packages', crate, 'Cargo.toml'), crate)
-			}
-			NodeFS.writeFileSync(NodePath.join(dir, 'packages', 'app', 'src', 'main.rs'), 'fn main() {}')
-			NodeFS.writeFileSync(library(dir), 'pub fn a() {}')
-			NodeFS.writeFileSync(NodePath.join(dir, 'Cargo.lock'), 'lock')
-			NodeChildProcess.execFileSync('git', ['init', '-q'], { cwd: dir })
-			return dir
-		}
-		const shared = {
-			cacheDir: NodePath.join(scratch, 'target', 'dev-bin'),
-			cargoArgs: [],
-			cwd: scratch,
-			env: {},
-			ignoredInputs: [],
-			targetDir: NodePath.join(scratch, 'target'),
-		}
-		const program = {
-			...shared,
-			inputs: ['Cargo.lock', 'packages/app', 'packages/a'],
-			programs: ['app'],
-		}
-		const tests = {
-			...shared,
-			inputs: ['Cargo.lock', 'packages/a'],
-			programInputs: {},
-			shared: program.inputs,
-			tested: ['packages/a'],
-		}
-		/** Why each crate compiles, recorded as if the build succeeded. */
-		const rebuilt = (worktree: string, build: typeof program | typeof tests) => {
-			const prepared = prepareCheckoutCrates(worktree, build)
-			prepared.recordBuilt()
-			return prepared.rebuilt
-		}
-		return { checkout, library, program, rebuilt, tests }
-	}
-
-	it('trusts shared output per build and content, from any checkout', () => {
+	it("starts a build output from another checkout's third-party crates, never from a running one", async () => {
 		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
-		const { checkout, library, program, rebuilt, tests } = sharedBuilds(scratch)
-		const programTests = {
-			...tests,
-			inputs: program.inputs,
-			programInputs: { 'packages/app': program.inputs },
-			tested: ['packages/app'],
+		const primary = NodePath.join(scratch, 'primary')
+		const worktree = NodePath.join(scratch, 'worktree')
+		// Ran Cargo last, but it failed before compiling anything.
+		const broken = NodePath.join(scratch, 'broken')
+		const git = (...args: ReadonlyArray<string>) =>
+			NodeChildProcess.execFileSync('git', args, { cwd: primary })
+		const output = (checkout: string) => NodePath.join(checkout, 'target', 'dev')
+		const write = (file: string, content = '') => {
+			NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true })
+			NodeFS.writeFileSync(file, content)
 		}
-		const both = {
-			...tests,
-			inputs: program.inputs,
-			programInputs: { 'packages/app': program.inputs },
-			tested: ['packages/a', 'packages/app'],
-		}
-		/** How many crates the build compiles, recorded as if it succeeded. */
-		const compiles = (worktree: string, build: typeof program | typeof tests) =>
-			Object.keys(rebuilt(worktree, build)).length
 		try {
-			const here = checkout('here')
-			const there = checkout('there')
-			expect(compiles(here, program)).toBe(2)
-			// A test run compiles the crates it does not test as the programs do.
-			expect(compiles(here, programTests)).toBe(1)
-			expect(compiles(here, tests)).toBe(1)
-			// The tests compiled the content the program was compiled from.
-			expect(compiles(here, program)).toBe(0)
-			expect(NodeFS.statSync(library(here)).mtime.getUTCFullYear()).toBe(2000)
-			expect(compiles(here, tests)).toBe(0)
-			// Cargo builds every checkout through one path, so the same content serves them all.
-			expect(compiles(there, program)).toBe(0)
-			expect(compiles(there, tests)).toBe(0)
-			expect(NodeFS.statSync(library(there)).mtime.getUTCFullYear()).toBe(2000)
-			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
-			expect(compiles(there, tests)).toBe(1)
-			expect(compiles(here, program)).toBe(1)
-			expect(compiles(here, tests)).toBe(1)
-			// A program's own crate hashes with the program's loose inputs in its tests too.
-			expect(compiles(here, both)).toBe(2)
-			expect(compiles(here, tests)).toBe(0)
-			expect(compiles(here, program)).toBe(0)
-			// Compiling other content anywhere ends every build's trust in what it replaced.
-			expect(compiles(there, both)).toBe(1)
-			expect(compiles(here, tests)).toBe(1)
-		} finally {
-			NodeFS.rmSync(scratch, { force: true, recursive: true })
-		}
-	})
+			NodeFS.mkdirSync(primary)
+			git('init', '-q')
+			git('-c', 'user.name=a', '-c', 'user.email=a@a', 'commit', '-q', '--allow-empty', '-m', 'a')
+			git('worktree', 'add', '-q', worktree)
+			git('worktree', 'add', '-q', broken)
+			const source = NodePath.join(output(primary), 'debug')
+			write(NodePath.join(source, 'deps', 'libtokio-1.rlib'), 'tokio')
+			write(NodePath.join(source, '.fingerprint', 'tokio-0123456789abcdef', 'lib-tokio'))
+			write(NodePath.join(source, '.fingerprint', 'engine-0123456789abcdef', 'lib-engine'))
+			write(NodePath.join(source, '.fingerprint', 'tauri-0123456789abcdef', 'lib-tauri'))
+			write(NodePath.join(source, 'build', 'tauri-0123456789abcdef', 'out', 'permission-files'))
+			write(NodePath.join(output(primary), 'cargo-started'), 'run')
+			const running = NodePath.join(output(primary), `cargo-running.${process.pid}.a`)
+			write(running)
+			const later = new Date(Date.now() + 60_000)
+			write(NodePath.join(output(broken), 'cargo-started'), 'run')
+			NodeFS.utimesSync(NodePath.join(output(broken), 'cargo-started'), later, later)
 
-	it('says why each crate compiles again', () => {
-		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
-		const { checkout, library, program, rebuilt, tests } = sharedBuilds(scratch)
-		try {
-			const here = checkout('here')
-			const there = checkout('there')
-			expect(rebuilt(here, program)).toEqual({
-				'packages/a': { reason: 'unrecorded' },
-				'packages/app': { reason: 'unrecorded' },
-			})
-			expect(rebuilt(here, tests)).toEqual({ 'packages/a': { reason: 'other-build' } })
-			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
-			expect(rebuilt(there, program)).toEqual({ 'packages/a': { reason: 'other-checkout' } })
-			expect(rebuilt(here, program)).toEqual({ 'packages/a': { reason: 'other-checkout' } })
-			NodeFS.writeFileSync(library(here), 'pub fn c() {}')
-			NodeFS.writeFileSync(NodePath.join(here, 'packages', 'a', 'src', 'new.rs'), '')
-			expect(rebuilt(here, program)).toEqual({
-				'packages/a': {
-					reason: 'edited',
-					files: ['packages/a/src/lib.rs', 'packages/a/src/new.rs'],
-				},
-			})
+			await seedBuildOutput(worktree, output(worktree), new Set(['engine']), 'test')
+			expect(NodeFS.existsSync(NodePath.join(output(worktree), 'debug'))).toBe(false)
+
+			NodeFS.rmSync(running)
+			await seedBuildOutput(worktree, output(worktree), new Set(['engine']), 'test')
+			const seeded = NodePath.join(output(worktree), 'debug')
+			expect(NodeFS.readFileSync(NodePath.join(seeded, 'deps', 'libtokio-1.rlib'), 'utf8')).toBe(
+				'tokio',
+			)
+			// This repo's crates compile from the checkout itself, and tauri's build script runs again.
+			expect(NodeFS.readdirSync(NodePath.join(seeded, '.fingerprint'))).toEqual([
+				'tokio-0123456789abcdef',
+			])
+			expect(NodeFS.readdirSync(NodePath.join(seeded, 'build'))).toEqual([])
 		} finally {
 			NodeFS.rmSync(scratch, { force: true, recursive: true })
 		}

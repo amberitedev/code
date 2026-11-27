@@ -1,5 +1,5 @@
 //! The engine's wire types, generated to `packages/contracts/ts/engine.ts`, which
-//! `cargo test -p engine` keeps fresh. Regenerate it with
+//! `cargo test -p engine --features export-ts` keeps fresh. Regenerate it with
 //! `WRITE_TS=1 node scripts/dev-runner.ts test engine`.
 
 use contracts::ts::config;

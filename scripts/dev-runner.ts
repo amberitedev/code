@@ -38,18 +38,17 @@ const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 const UP_WAIT_MS = 9 * 60_000
 // One cached program per distinct set of Rust inputs. Older ones are deleted.
 const CACHED_PROGRAMS = 6
-const BUILD_LOCK_STALE_MS = 60 * 60_000
-const BUILD_LOCK = 'building'
-// In the shared build output: each repo crate's content when last compiled, and for which programs.
-const BUILT_CRATES = 'built-crates.json'
-// In a checkout's `.data`: each repo crate's files when this checkout last compiled it.
-const OWN_BUILT_FILES = 'built-files.json'
-// The most changed files a timing line names per crate.
-const LOGGED_FILES = 100
-// In the shared build output's record: a crate's output as the programs compile it.
-const PROGRAMS = 'programs'
-// Given to an unchanged crate's files so Cargo trusts its compiled output.
-const TRUSTED_FILE_TIME = new Date('2000-01-01T00:00:00Z')
+// In the primary checkout's `target`: the latest test runs that passed, by everything that went
+// into them, from any checkout.
+const PASSED_TESTS = 'passed-tests.json'
+const PASSED_TEST_RUNS = 200
+// In a checkout's build output: rewritten as each Cargo run starts, and one `<name>.<pid>.<id>`
+// file per Cargo run in progress. Another checkout copies the output only while neither changes.
+const CARGO_STARTED = 'cargo-started'
+const CARGO_RUNNING = 'cargo-running'
+// What a new build output takes from another: third-party crates, compiled the same anywhere.
+const SEEDED_FOLDERS = ['deps', 'build', '.fingerprint']
+const SEED_COPIES = 64
 const FETCH_BAD_PORTS = new Set([
 	0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
 	103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465,
@@ -106,10 +105,10 @@ type RunnerInput = {
  * something already built starts without Cargo, and a running program never blocks a build.
  */
 export type ProgramBuild = {
-	/** Programs built by every checkout, shared. Its lock lets one build run at a time. */
+	/** Programs built by every checkout, shared. */
 	readonly cacheDir: string
 	readonly cargoArgs: ReadonlyArray<string>
-	/** The checkout to build. Cargo runs from a link to it, taking its toolchain and settings. */
+	/** The checkout to build, where Cargo runs. */
 	readonly cwd: string
 	/** Settings the build reads. They change the program, so they are part of its key. */
 	readonly env: Record<string, string>
@@ -119,17 +118,11 @@ export type ProgramBuild = {
 	readonly inputs: ReadonlyArray<string>
 	/** The files Cargo writes in `<targetDir>/debug`. */
 	readonly programs: ReadonlyArray<string>
+	/** This checkout's own build output. */
 	readonly targetDir: string
 }
 /** `cargo test` of some crates, compiled into the programs' build output the way they are. */
-export type TestBuild = Omit<ProgramBuild, 'programs'> & {
-	/** What the programs build reads. A crate in it that is not tested is compiled as they compile it. */
-	readonly shared: ReadonlyArray<string>
-	/** The tested crates that are a program's own crate, by folder, with that program's inputs. */
-	readonly programInputs: Readonly<Record<string, ReadonlyArray<string>>>
-	/** The tested crates' folders, sorted, as `inputs` names them. */
-	readonly tested: ReadonlyArray<string>
-}
+export type TestBuild = Omit<ProgramBuild, 'programs'>
 export type ProcessSpec = {
 	readonly args: ReadonlyArray<string>
 	/** Set when the process is a Rust program: the build and its file. Otherwise the arguments go to `vp`. */
@@ -386,7 +379,7 @@ async function main(): Promise<void> {
 		return
 	}
 	if (command === 'stop' || command === 'rs') return sendProgramCommand(paths, command, commandArgs)
-	if (command === 'build') return buildPrograms(paths)
+	if (command === 'build') return buildPrograms(paths, commandArgs)
 	if (command === 'test') return testCrates(paths, commandArgs)
 	if (command !== 'dev') {
 		throw new DevRunnerError(
@@ -793,10 +786,20 @@ function readSharedEnv(paths: WorktreePaths): NodeJS.ProcessEnv {
 }
 
 /**
- * `build`: compiles the App and Core for this checkout's current Rust without starting anything,
- * so a later `up` finds them ready. Worktree setup runs it in the background.
+ * `build [--test <crate>]...`: compiles the App and Core for this checkout's current Rust without
+ * starting anything, so a later `up` finds them ready. Worktree setup runs it in the background.
+ * With `--test`, the crates are tested after it, failed or not.
  */
-async function buildPrograms(paths: WorktreePaths): Promise<void> {
+async function buildPrograms(paths: WorktreePaths, args: ReadonlyArray<string>): Promise<void> {
+	const tests = args.filter((_, index) => index % 2 === 1)
+	if (args.some((arg, index) => index % 2 === 0 && arg !== '--test') || args.length % 2 === 1) {
+		throw new DevRunnerError('build takes only `--test <crate>` pairs.')
+	}
+	await buildProgramsOnce(paths)
+	if (tests.length > 0) await testCrates(paths, tests)
+}
+
+async function buildProgramsOnce(paths: WorktreePaths): Promise<void> {
 	const ports = portsForOffset(0)
 	const specs = createStackSpecs({
 		// Only the builds are used, so no App ever gets this address.
@@ -815,10 +818,7 @@ async function buildPrograms(paths: WorktreePaths): Promise<void> {
 	}
 }
 
-/**
- * `test <crate>...`: one `cargo test` of the crates in the shared build output, one build at a
- * time like the programs, so a checkout that runs tests never fills its own `target`.
- */
+/** `test <crate>...`: one `cargo test` of the crates in this checkout's build output. */
 async function testCrates(paths: WorktreePaths, crates: ReadonlyArray<string>): Promise<void> {
 	const known = new Set([...localCrates(paths.worktree).values()].map((crate) => crate.name))
 	const unknown = crates.filter((crate) => !known.has(crate))
@@ -837,16 +837,8 @@ export function testBuild(
 	env: NodeJS.ProcessEnv,
 	crates: ReadonlyArray<string>,
 ): TestBuild {
-	const checkout = NodeFS.realpathSync.native(paths.worktree)
 	const tested = [...localCrates(paths.worktree).values()].filter((crate) =>
 		crates.includes(crate.name),
-	)
-	const folder = (crate: LocalCrate) =>
-		NodePath.relative(checkout, crate.folder).replaceAll('\\', '/')
-	const programs = tested.flatMap((crate) =>
-		crate.name === 'copal' || crate.name === 'amberite-app'
-			? [[folder(crate), programInputs(paths, crate.name)] as const]
-			: [],
 	)
 	const { cargoArgs: _, programs: __, ...shared } = programsBuild(paths, env)
 	const targets = tested.flatMap((crate) => crate.testTargets)
@@ -862,12 +854,15 @@ export function testBuild(
 			...crates.flatMap((crate) => (PROGRAM_PACKAGES.includes(crate) ? [] : ['--package', crate])),
 			'--no-default-features',
 			...tested.flatMap((crate) =>
-				crate.hasDefault && crate.name !== 'amberite-app'
+				crate.features.includes('default') && crate.name !== 'amberite-app'
 					? ['--features', `${crate.name}/default`]
 					: [],
 			),
-			// The App's tests check its generated TypeScript, as in CI.
-			...(crates.includes('amberite-app') ? ['--features', 'amberite-app/export-ts'] : []),
+			// Their tests check their generated TypeScript, as in CI, where the App's feature turns
+			// it on for every crate. Only the tested crates take it, so the rest stay as compiled.
+			...tested.flatMap((crate) =>
+				crate.features.includes('export-ts') ? ['--features', `${crate.name}/export-ts`] : [],
+			),
 			// Cargo takes `--lib` once, for every selected package.
 			...(targets.includes('--lib') ? ['--lib'] : []),
 			...targets.filter((target) => target !== '--lib'),
@@ -875,12 +870,11 @@ export function testBuild(
 		inputs: [
 			...new Set([
 				...crates.flatMap((crate) => workspaceInputs(paths, crate, { tests: true })),
-				...programs.flatMap(([, inputs]) => inputs),
+				...crates.flatMap((crate) =>
+					crate === 'copal' || crate === 'amberite-app' ? programInputs(paths, crate) : [],
+				),
 			]),
 		],
-		programInputs: Object.fromEntries(programs),
-		shared: shared.inputs,
-		tested: tested.map(folder).sort(),
 	}
 }
 
@@ -893,48 +887,66 @@ async function runTests(
 ): Promise<boolean> {
 	const spec = { env, label: `test ${crates.join(' ')}` }
 	const started = performance.now()
-	const unlock = await lockBuilds(build.cacheDir, spec.label, () => false)
-	if (!unlock) return false
-	const lockWait = performance.now() - started
+	const key = programKey(paths.worktree, build)
+	// The tests see this environment too, so a pass counts for it alone.
+	const passKey = (programs: string) =>
+		NodeCrypto.createHash('sha256')
+			.update(programs)
+			.update(JSON.stringify(Object.entries(env).sort(([a], [b]) => (a < b ? -1 : 1))))
+			.digest('hex')
+			.slice(0, 20)
+	const passedFile = NodePath.join(paths.primary, 'target', PASSED_TESTS)
+	const passed = (): ReadonlyArray<string> => {
+		try {
+			return JSON.parse(NodeFS.readFileSync(passedFile, 'utf8'))
+		} catch {
+			return []
+		}
+	}
+	if (passed().includes(passKey(key))) {
+		runnerLog('info', `${spec.label} passed already with these inputs (${passKey(key)})`)
+		recordTiming(paths.primary, {
+			kind: 'test',
+			worktree: paths.worktree,
+			crates,
+			result: 'ok',
+			passedBefore: true,
+			ms: { total: Math.round(performance.now() - started) },
+		})
+		return true
+	}
 	let compiled: number | undefined
-	const runs: CompileRun[] = []
+	let timings: CargoTimings | undefined
 	let result: 'ok' | 'failed' = 'failed'
 	try {
-		let key = programKey(paths.worktree, build)
-		for (;;) {
-			const run = await compileShared(
-				paths.worktree,
-				spec,
-				build,
-				new Set(),
-				[...build.cargoArgs, '--no-run'],
-				key,
-			)
-			runs.push(run)
-			if (!run.compiled) return false
-			if (run.key === key) break
-			key = run.key
-		}
+		const built = await runCargo(spec, build, new Set(), [
+			...build.cargoArgs,
+			'--no-run',
+			'--timings',
+		])
+		timings = takeCargoTimings(build.targetDir)
+		if (!built) return false
 		compiled = performance.now()
-		// Still locked: another checkout's build would replace these test programs.
 		if (await runCargo(spec, build, new Set(), build.cargoArgs)) result = 'ok'
-		// Cargo compiles what was edited since `--no-run` again, which the record does not describe.
-		if (programKey(paths.worktree, build) !== key) {
-			NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
+		// An input edited during the run may not be what was tested.
+		if (result === 'ok' && programKey(paths.worktree, build) === key) {
+			try {
+				writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
+			} catch {
+				// Another checkout wrote it this instant; this pass is only not remembered.
+			}
 		}
 		return result === 'ok'
 	} finally {
-		unlock()
 		const finished = performance.now()
 		recordTiming(paths.primary, {
 			kind: 'test',
 			worktree: paths.worktree,
 			crates,
 			result,
-			...compiledDetails(paths.worktree, runs),
+			...compiledDetails(paths.worktree, timings ? [timings] : []),
 			ms: {
-				lockWait: Math.round(lockWait),
-				compile: Math.round((compiled ?? finished) - started - lockWait),
+				compile: Math.round((compiled ?? finished) - started),
 				...(compiled === undefined ? {} : { test: Math.round(finished - compiled) }),
 				total: Math.round(finished - started),
 			},
@@ -1091,7 +1103,6 @@ function programsBuild(paths: WorktreePaths, env: NodeJS.ProcessEnv): ProgramBui
 			),
 		},
 		ignoredInputs: engine.ignoredInputs,
-		// The App's first: loose inputs count toward the first crate.
 		inputs: [
 			...new Set([...programInputs(paths, 'amberite-app'), ...programInputs(paths, 'copal')]),
 		],
@@ -1170,9 +1181,9 @@ type LocalCrate = {
 	readonly dependencies: ReadonlyArray<string>
 	/** Folders of the local crates only its tests, examples and benchmarks build with. */
 	readonly devDependencies: ReadonlyArray<string>
+	/** The features it declares. */
+	readonly features: ReadonlyArray<string>
 	readonly folder: string
-	/** Whether it declares a `default` feature. */
-	readonly hasDefault: boolean
 	readonly name: string
 	/** Cargo target flags that select its tests: its library, programs and integration tests. */
 	readonly testTargets: ReadonlyArray<string>
@@ -1207,8 +1218,8 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 			crates.set(folder, {
 				dependencies: local(false),
 				devDependencies: local(true),
+				features: Object.keys(crate.features),
 				folder,
-				hasDefault: 'default' in crate.features,
 				name: crate.name,
 				testTargets: crate.targets.flatMap((target) =>
 					target.kind.includes('lib')
@@ -1227,13 +1238,15 @@ function localCrates(worktree: string): ReadonlyMap<string, LocalCrate> {
 }
 
 /**
- * Every checkout compiles into one build output, like a pnpm store: each dependency is compiled
- * once and kept once. Builds already run one at a time. Only the runner compiles there, so
- * `BUILT_CRATES` describes everything in it; a person's own Cargo runs use `target` as usual.
+ * Each checkout compiles into its own `target/dev`, so builds never wait on each other or replace
+ * each other's output; `seedBuildOutput` starts it with another checkout's third-party crates.
+ * Finished programs go to one folder every checkout shares.
  */
 function workspaceBuildDirs(paths: WorktreePaths): Pick<ProgramBuild, 'cacheDir' | 'targetDir'> {
-	const targetDir = NodePath.join(paths.primary, 'target', 'dev-shared')
-	return { cacheDir: NodePath.join(targetDir, 'dev-bin'), targetDir }
+	return {
+		cacheDir: NodePath.join(paths.primary, 'target', 'dev-bin'),
+		targetDir: NodePath.join(paths.worktree, 'target', 'dev'),
+	}
 }
 
 function programFile(name: string): string {
@@ -1336,58 +1349,55 @@ async function buildProgram(
 		runnerLog('info', `${spec.label} using ${cached(key)}`)
 	} else {
 		const started = performance.now()
-		const unlock = await lockBuilds(cache, spec.label, stopped)
-		if (!unlock) return undefined
-		const lockWait = performance.now() - started
-		const runs: CompileRun[] = []
+		const timings: CargoTimings[] = []
 		let result: 'ok' | 'failed' = 'failed'
 		try {
-			// Another runner may have built it while this one waited.
 			while (!complete(key)) {
+				if (stopped()) return undefined
 				runnerLog('info', `${spec.label} building ${build.programs.join(', ')} (${key})`)
-				const run = await compileShared(worktree, spec, build, builds, build.cargoArgs, key)
-				runs.push(run)
-				if (!run.compiled) return undefined
-				if (run.key === key) {
-					NodeFS.mkdirSync(cached(key), { recursive: true })
-					for (const program of build.programs) {
-						const target = NodePath.join(cached(key), program)
-						const partial = `${target}.${process.pid}.partial`
-						NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', program), partial)
-						NodeFS.renameSync(partial, target)
-					}
-				}
-				key = run.key
+				const built = await runCargo(spec, build, builds, [...build.cargoArgs, '--timings'])
+				const report = takeCargoTimings(build.targetDir)
+				if (report) timings.push(report)
+				if (!built) return undefined
+				const builtKey = programKey(worktree, build)
+				// An input edited during the run makes the output a mix, so it compiles again.
+				if (builtKey === key) saveProgram(build, cached(key))
+				key = builtKey
 			}
 			result = 'ok'
 		} finally {
-			unlock()
 			const total = performance.now() - started
-			// The shared build output is <primary>/target/dev-shared.
-			recordTiming(NodePath.resolve(build.targetDir, '..', '..'), {
+			// The shared program folder is <primary>/target/dev-bin.
+			recordTiming(NodePath.resolve(cache, '..', '..'), {
 				kind: 'build',
 				worktree,
 				program: build.programs.join(' '),
 				key,
 				result,
-				...compiledDetails(worktree, runs),
-				ms: {
-					lockWait: Math.round(lockWait),
-					compile: Math.round(total - lockWait),
-					total: Math.round(total),
-				},
+				...compiledDetails(worktree, timings),
+				ms: { total: Math.round(total) },
 			})
 		}
 	}
 	const used = new Date()
-	NodeFS.utimesSync(cached(key), used, used)
+	try {
+		NodeFS.utimesSync(cached(key), used, used)
+	} catch {
+		// Pruned by another checkout this instant: starting fails, and the next start builds it again.
+	}
+	// Other checkouts prune this folder too.
 	const keys = NodeFS.readdirSync(cache)
-		.filter((entry) => entry !== BUILD_LOCK)
-		.map((entry) => NodePath.join(cache, entry))
-		.sort((left, right) => NodeFS.statSync(right).mtimeMs - NodeFS.statSync(left).mtimeMs)
-	for (const old of keys.slice(CACHED_PROGRAMS)) {
+		.flatMap((entry) => {
+			try {
+				return [{ entry, at: NodeFS.statSync(NodePath.join(cache, entry)).mtimeMs }]
+			} catch {
+				return []
+			}
+		})
+		.sort((left, right) => right.at - left.at)
+	for (const { entry } of keys.slice(CACHED_PROGRAMS).filter(({ entry }) => entry !== key)) {
 		try {
-			NodeFS.rmSync(old, { recursive: true })
+			NodeFS.rmSync(NodePath.join(cache, entry), { recursive: true })
 		} catch {
 			// Still running in another checkout.
 		}
@@ -1395,209 +1405,31 @@ async function buildProgram(
 	return cached(key)
 }
 
-/**
- * One Cargo run into the shared build output, with the checkout's crates dated for it first and
- * recorded once it succeeds. An input edited during the run makes the output a mix, and Cargo may
- * have compiled crates the record calls unchanged, so the record is forgotten and the returned key
- * differs from `key`: the caller compiles again.
- */
-async function compileShared(
-	worktree: string,
-	spec: Pick<ProcessSpec, 'env' | 'label'>,
-	build: ProgramBuild | TestBuild,
-	builds: Set<NodeChildProcess.ChildProcess>,
-	args: ReadonlyArray<string>,
-	key: string,
-): Promise<CompileRun> {
-	const prepared = prepareCheckoutCrates(worktree, build)
-	const compiled = await runCargo(spec, build, builds, [...args, '--timings'])
-	const timings = takeCargoTimings(build.targetDir)
-	const builtKey = programKey(worktree, build)
-	if (builtKey !== key) {
-		NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
-	} else if (compiled) prepared.recordBuilt()
-	return { rebuilt: prepared.rebuilt, timings, compiled, key: builtKey }
-}
-
-type CompileRun = {
-	readonly rebuilt: Readonly<Record<string, Rebuilt>>
-	readonly timings: CargoTimings | undefined
-	readonly compiled: boolean
-	readonly key: string
-}
-
-/** What a build or test run's timing line says about what compiled and why. */
-function compiledDetails(worktree: string, runs: ReadonlyArray<CompileRun>) {
+/** What a build or test run's timing line says about what compiled, from Cargo's `--timings`. */
+function compiledDetails(worktree: string, timings: ReadonlyArray<CargoTimings>) {
 	const names = new Set([...localCrates(worktree).values()].map((crate) => crate.name))
-	return {
-		branch: currentBranch(worktree),
-		// Crates in the repo compiled again; third-party crates are not counted.
-		changedCrates: runs.reduce((count, run) => count + Object.keys(run.rebuilt).length, 0),
-		rebuilt: Object.assign({}, ...runs.map((run) => run.rebuilt)),
-		...summarizeCargoTimings(
-			runs.flatMap((run) => (run.timings ? [run.timings] : [])),
-			names,
-		),
-	}
-}
-
-type BuiltCrate = {
-	readonly hash: string
-	/**
-	 * The builds whose output of it is from this content: `programs` for the crate as the programs
-	 * compile it, which every test run that does not test it compiles too, and `test <folder>...`
-	 * for its own tests. Named `programs` because checkouts on older branches share this record.
-	 */
-	readonly programs: ReadonlyArray<string>
+	return { branch: currentBranch(worktree), ...summarizeCargoTimings(timings, names) }
 }
 
 /**
- * Why a repo crate compiles again: `edited` when this checkout changed it since its last build here
- * (`files` names what changed), `other-checkout` when another checkout compiled other content of it
- * since, `other-build` when only another build kind (programs or a crate's tests) compiled this
- * content, and `unrecorded` when the shared record has nothing for it.
+ * Copies the built programs into `folder`. Another checkout with the same inputs may have saved
+ * them first and be running them, and Windows cannot replace a running program, so a program
+ * already there is kept.
  */
-export type Rebuilt =
-	| {
-			readonly reason: 'edited'
-			readonly files: ReadonlyArray<string>
-			readonly moreFiles?: number
-	  }
-	| { readonly reason: 'other-checkout' | 'other-build' | 'unrecorded' }
-
-type LastBuilt = {
-	readonly hash: string
-	readonly files: Readonly<Record<string, string>>
-}
-
-/**
- * Cargo decides whether a crate needs compiling from file times alone, and every checkout shares
- * one build output. So before a build, each crate in the repo is checked against the content it
- * was last compiled from as this build compiles it: as the programs do, or as one crate's tests. A
- * crate that matches gets old file times, folders included, so Cargo keeps its compiled output even
- * though this checkout's files are newer. A crate that differs, or was last compiled for other
- * builds only, gets the current time, so Cargo compiles it again from this checkout. Returns the
- * crates that will compile and why, and what to record once the build succeeds.
- */
-export function prepareCheckoutCrates(
-	worktree: string,
-	build: ProgramBuild | TestBuild,
-): { readonly rebuilt: Readonly<Record<string, Rebuilt>>; readonly recordBuilt: () => void } {
-	const recordFile = NodePath.join(build.targetDir, BUILT_CRATES)
-	let record: Record<string, BuiltCrate> = {}
-	try {
-		record = JSON.parse(NodeFS.readFileSync(recordFile, 'utf8'))
-	} catch {
-		// First build into this folder: every crate compiles.
-	}
-	const lastBuiltFile = NodePath.join(worktree, '.data', OWN_BUILT_FILES)
-	let lastBuilt: Record<string, LastBuilt> = {}
-	try {
-		lastBuilt = JSON.parse(NodeFS.readFileSync(lastBuiltFile, 'utf8'))
-	} catch {
-		// This checkout has not compiled anything yet.
-	}
-	// Test runs compile the crates they do not test exactly as the programs do.
-	const buildName = (folder: string) =>
-		'tested' in build && (build.tested.includes(folder) || !build.shared.includes(folder))
-			? `test ${build.tested.join(' ')}`
-			: PROGRAMS
-	const folders = build.inputs.filter((input) =>
-		NodeFS.existsSync(NodePath.join(worktree, input, 'Cargo.toml')),
-	)
-	const files = new Map<string, Array<[string, string]>>(folders.map((folder) => [folder, []]))
-	// Inputs outside every crate folder, such as the App's version in `package.json`, count toward
-	// the program's own crate (the first input folder), in its tests too, so the two keep trusting
-	// each other's output.
-	const own = 'tested' in build ? build.programInputs : { [folders[0] ?? '']: build.inputs }
-	const loose: Array<[string, string]> = []
-	for (const [file, blob] of inputContents(worktree, build)) {
-		const folder = folders
-			.filter((candidate) => file.startsWith(`${candidate}/`))
-			.sort((left, right) => right.length - left.length)[0]
-		if (folder) files.get(folder)!.push([file, blob])
-		else loose.push([file, blob])
-	}
-	const hashes = new Map<string, LastBuilt>()
-	const now = new Date()
-	const rebuilt: Record<string, Rebuilt> = {}
-	for (const [folder, entries] of files) {
-		const hash = NodeCrypto.createHash('sha256')
-		const inputs = own[folder] ?? []
-		const hashed = [
-			...entries,
-			...loose.filter(([file]) =>
-				inputs.some((input) => file === input || file.startsWith(`${input}/`)),
-			),
-		]
-		for (const [file, blob] of hashed.sort(([left], [right]) => (left < right ? -1 : 1))) {
-			hash.update(file).update('\0').update(blob).update('\0')
-		}
-		const digest = hash.digest('hex')
-		const current = { hash: digest, files: Object.fromEntries(hashed) }
-		hashes.set(folder, current)
-		const built = record[folder]
-		const trusted = built?.hash === digest && built.programs.includes(buildName(folder))
-		if (!trusted) {
-			rebuilt[folder] = rebuildReason(lastBuilt[folder], current, built)
-			// Compiling from other content may replace what other builds use, whether or not this
-			// build succeeds.
-			if (built?.hash !== digest) delete record[folder]
-		}
-		const time = trusted ? TRUSTED_FILE_TIME : now
-		// Cargo also compares folder times for a build script's `rerun-if-changed` folders, and a new
-		// checkout's folders are new.
-		const dated = new Set(entries.map(([file]) => file))
-		if (trusted) {
-			for (const [file] of entries) {
-				for (let parent = NodePath.posix.dirname(file); parent.startsWith(folder);) {
-					if (dated.has(parent)) break
-					dated.add(parent)
-					parent = NodePath.posix.dirname(parent)
-				}
-			}
-		}
-		for (const file of dated) {
-			try {
-				NodeFS.utimesSync(NodePath.join(worktree, file), time, time)
-			} catch {
-				// Deleted since it was listed.
-			}
+function saveProgram(build: ProgramBuild, folder: string): void {
+	NodeFS.mkdirSync(folder, { recursive: true })
+	for (const program of build.programs) {
+		const target = NodePath.join(folder, program)
+		if (NodeFS.existsSync(target)) continue
+		const partial = `${target}.${process.pid}.partial`
+		NodeFS.copyFileSync(NodePath.join(build.targetDir, 'debug', program), partial)
+		try {
+			NodeFS.renameSync(partial, target)
+		} catch (error) {
+			NodeFS.rmSync(partial, { force: true })
+			if (!NodeFS.existsSync(target)) throw error
 		}
 	}
-	writeRecord(recordFile, record)
-	const recordBuilt = () => {
-		for (const [folder, current] of hashes) {
-			const built = record[folder]?.hash === current.hash ? record[folder] : undefined
-			record[folder] = {
-				hash: current.hash,
-				programs: [...new Set([...(built?.programs ?? []), buildName(folder)])],
-			}
-			lastBuilt[folder] = current
-		}
-		writeRecord(recordFile, record)
-		writeRecord(lastBuiltFile, lastBuilt)
-	}
-	return { rebuilt, recordBuilt }
-}
-
-function rebuildReason(
-	last: LastBuilt | undefined,
-	current: LastBuilt,
-	built: BuiltCrate | undefined,
-): Rebuilt {
-	if (last && last.hash !== current.hash) {
-		const files = [...new Set([...Object.keys(last.files), ...Object.keys(current.files)])]
-			.filter((file) => last.files[file] !== current.files[file])
-			.sort()
-		return {
-			reason: 'edited',
-			files: files.slice(0, LOGGED_FILES),
-			...(files.length > LOGGED_FILES ? { moreFiles: files.length - LOGGED_FILES } : {}),
-		}
-	}
-	if (!built) return { reason: 'unrecorded' }
-	return { reason: built.hash === current.hash ? 'other-build' : 'other-checkout' }
 }
 
 /** Written whole, then renamed into place, so a stopped runner never leaves half a record. */
@@ -1615,34 +1447,30 @@ async function runCargo(
 	builds: Set<NodeChildProcess.ChildProcess>,
 	args: ReadonlyArray<string>,
 ): Promise<boolean> {
-	const debug = NodePath.join(build.targetDir, 'debug')
-	// Cargo keeps each program in both folders, and either one can be the file moved aside below.
-	for (const folder of [debug, NodePath.join(debug, 'deps')]) {
-		for (const entry of NodeFS.existsSync(folder) ? NodeFS.readdirSync(folder) : []) {
-			if (!entry.endsWith('.old')) continue
-			try {
-				NodeFS.rmSync(NodePath.join(folder, entry))
-			} catch {
-				// Still running.
-			}
-		}
+	if (!NodeFS.existsSync(NodePath.join(build.targetDir, 'debug'))) {
+		const ours = new Set([...localCrates(build.cwd).values()].map((crate) => crate.name))
+		await seedBuildOutput(build.cwd, build.targetDir, ours, spec.label)
 	}
-	const checkout = linkCheckout(build.targetDir, build.cwd)
-	// Compiler messages name the checkout itself, never the link another build will move.
-	const toCheckout = (line: string) =>
-		line.replaceAll(checkout, build.cwd).replaceAll(checkout.replaceAll('\\', '/'), build.cwd)
-	for (let retried = false; ; retried = true) {
-		// On Unix, Cargo finds the manifest from the physical working directory, not the link.
-		const [command, ...rest] = args
-		const manifest = ['--manifest-path', NodePath.join(checkout, 'Cargo.toml')]
-		const child = NodeChildProcess.spawn('cargo', [command!, ...manifest, ...rest], {
-			cwd: checkout,
+	NodeFS.mkdirSync(build.targetDir, { recursive: true })
+	cargoRunning(build.targetDir)
+	// The marker first: a copy that read the old `CARGO_STARTED` then sees the new one.
+	const running = NodePath.join(
+		build.targetDir,
+		`${CARGO_RUNNING}.${process.pid}.${NodeCrypto.randomUUID()}`,
+	)
+	NodeFS.writeFileSync(running, '')
+	NodeFS.writeFileSync(NodePath.join(build.targetDir, CARGO_STARTED), NodeCrypto.randomUUID())
+	try {
+		const child = NodeChildProcess.spawn('cargo', args, {
+			cwd: build.cwd,
 			detached: process.platform !== 'win32',
 			env: cargoEnv({ ...spec.env, ...build.env, CARGO_TARGET_DIR: build.targetDir }),
 			stdio: ['ignore', 'pipe', 'pipe'],
 			windowsHide: true,
 		})
 		builds.add(child)
+		// Cargo can outlive this process when it is killed, and keeps writing.
+		NodeFS.writeFileSync(running, String(child.pid ?? ''))
 		// Compiles started by any checkout run behind whatever the person is doing. Windows gives
 		// the compiler processes Cargo starts the same priority.
 		try {
@@ -1650,12 +1478,8 @@ async function runCargo(
 		} catch {
 			// Already finished.
 		}
-		const failure: string[] = []
-		const rememberFailure = (line: string) => {
-			if (/Access is denied|failed to remove file/.test(line)) failure.push(line)
-		}
-		pipeOutput(child.stdout, spec.label, process.stdout, undefined, toCheckout)
-		pipeOutput(child.stderr, spec.label, process.stderr, rememberFailure, toCheckout)
+		pipeOutput(child.stdout, spec.label, process.stdout)
+		pipeOutput(child.stderr, spec.label, process.stderr)
 		const code = await new Promise<number>((resolve) => {
 			child.once('error', (error) => {
 				runnerLog('error', `Could not start cargo: ${error.message}`)
@@ -1664,86 +1488,169 @@ async function runCargo(
 			child.once('close', (exitCode) => resolve(exitCode ?? 1))
 		})
 		builds.delete(child)
-		if (code === 0) return true
-		// A checkout whose runner still starts programs straight from the build output has one
-		// running. Windows cannot replace a running program but can rename it, which leaves that
-		// one running.
-		const locked = failure
-			.map((line) => /failed to remove file `(.+\.exe)`/.exec(line)?.[1])
-			.find(Boolean)
-		if (retried || !locked || !failure.some((line) => line.includes('Access is denied'))) {
-			return false
-		}
-		NodeFS.renameSync(locked, `${locked}.${Date.now()}.old`)
-		runnerLog('info', `${spec.label} moved a running ${NodePath.basename(locked)} aside`)
+		return code === 0
+	} finally {
+		NodeFS.rmSync(running, { force: true })
 	}
 }
 
 /**
- * Every build runs Cargo from one path, a link to the checkout it builds, so what it compiles
- * holds the same paths whichever checkout that was. Otherwise the compiler's incremental state,
- * the paths build scripts record and `CARGO_MANIFEST_DIR` belong to one checkout, and the next
- * checkout compiles those crates from scratch. Builds take turns, so one link serves them all. It
- * sits beside the primary checkout, not in it, so Cargo reads no `.cargo` folder above it.
+ * Starts a new build output from the third-party crates of the checkout that ran Cargo last, so
+ * only this repo's crates compile. On a ReFS Dev Drive each copy is a block clone that takes no
+ * disk space until one side changes. A source that runs Cargo during the copy may be half written,
+ * so that copy is dropped and the next source tried. With none, Cargo compiles everything.
  */
-function linkCheckout(targetDir: string, checkout: string): string {
-	const link = `${NodePath.resolve(targetDir, '..', '..')}-checkout`
-	NodeFS.rmSync(link, { force: true })
-	// A junction on Windows, which needs no elevation.
-	NodeFS.symlinkSync(checkout, link, 'junction')
-	return link
+export async function seedBuildOutput(
+	worktree: string,
+	targetDir: string,
+	/** This repo's crates, which compile from `worktree` and are never taken from another. */
+	ours: ReadonlySet<string>,
+	label: string,
+): Promise<void> {
+	// Unknown when the manifests do not read, and their output elsewhere is from other files.
+	if (ours.size === 0) return
+	// tauri's build script lists the files in its output folder by absolute path, so it runs again
+	// for this folder instead of pointing into the source.
+	const compiledHere = new Set([...ours, 'tauri'])
+	const sources = git(['worktree', 'list', '--porcelain'], worktree)
+		.split(/\r?\n/)
+		.filter((line) => line.startsWith('worktree '))
+		.map((line) => NodePath.join(line.slice('worktree '.length), 'target', 'dev'))
+		.filter((source) => !samePath(source, targetDir))
+		.flatMap((source) => {
+			try {
+				return [{ source, at: NodeFS.statSync(NodePath.join(source, CARGO_STARTED)).mtimeMs }]
+			} catch {
+				return []
+			}
+		})
+		.sort((left, right) => right.at - left.at)
+	const debug = NodePath.join(targetDir, 'debug')
+	for (const { source } of sources) {
+		const seeding = NodePath.join(targetDir, `seeding.${process.pid}.${NodeCrypto.randomUUID()}`)
+		const before = idleRun(source)
+		if (!before || !NodeFS.existsSync(NodePath.join(source, 'debug', '.fingerprint'))) continue
+		const started = performance.now()
+		try {
+			await copyBuildOutput(NodePath.join(source, 'debug'), seeding, compiledHere)
+			if (idleRun(source) !== before) {
+				runnerLog('info', `${label} dropped a copy of ${source}, which ran Cargo meanwhile`)
+				continue
+			}
+			NodeFS.renameSync(seeding, debug)
+			runnerLog(
+				'info',
+				`${label} started its build output from ${source} in ${Math.round((performance.now() - started) / 1000)}s`,
+			)
+			return
+		} catch (error) {
+			// Another runner in this checkout seeded it first.
+			if (NodeFS.existsSync(debug)) return
+			runnerLog('warning', `${label} could not copy ${source}: ${String(error)}`)
+		} finally {
+			try {
+				NodeFS.rmSync(seeding, { force: true, recursive: true })
+			} catch {
+				// Held open for a moment, as Windows does: `cargoRunning` removes it later.
+			}
+		}
+	}
+}
+
+/** The latest Cargo run in a build output, while none runs there. */
+function idleRun(targetDir: string): string | undefined {
+	try {
+		// Read before the markers, the reverse of the order `runCargo` writes them.
+		const run = NodeFS.readFileSync(NodePath.join(targetDir, CARGO_STARTED), 'utf8')
+		return cargoRunning(targetDir) ? undefined : run
+	} catch {
+		return undefined
+	}
+}
+
+/**
+ * Whether a Cargo run is in progress in a build output, by its runner's or Cargo's process. Removes
+ * what killed runners left: their markers, which a reused process ID would keep alive, and copies.
+ */
+function cargoRunning(targetDir: string): boolean {
+	let running = false
+	for (const entry of NodeFS.readdirSync(targetDir)) {
+		const [name, pid] = entry.split('.')
+		if (name !== CARGO_RUNNING && name !== 'seeding') continue
+		const file = NodePath.join(targetDir, entry)
+		const pids = [Number(pid)]
+		try {
+			if (name === CARGO_RUNNING) pids.push(Number(NodeFS.readFileSync(file, 'utf8')))
+		} catch {
+			// Removed this instant.
+		}
+		if (pids.some((alive) => alive > 0 && processIsRunning(alive))) {
+			running ||= name === CARGO_RUNNING
+			continue
+		}
+		NodeFS.rmSync(file, { force: true, recursive: true })
+	}
+	return running
+}
+
+/**
+ * Copies the third-party part of `from` (a build output's `debug`), several files at a time,
+ * leaving out the crates in `skipped` and files Cargo is writing or removing.
+ */
+async function copyBuildOutput(
+	from: string,
+	to: string,
+	skipped: ReadonlySet<string>,
+): Promise<void> {
+	const files: Array<readonly [string, string]> = []
+	const walk = (source: string, target: string, top: boolean) => {
+		NodeFS.mkdirSync(target, { recursive: true })
+		for (const entry of NodeFS.readdirSync(source, { withFileTypes: true })) {
+			// The compiler's own scratch files and folders.
+			if (entry.name.startsWith('.tmp') || entry.name.startsWith('rmeta')) continue
+			// `build` and `.fingerprint` hold a `<crate>-<hash>` folder per crate.
+			if (top && skipped.has(/^(.+)-[0-9a-f]{16}$/.exec(entry.name)?.[1] ?? '')) continue
+			const pair = [NodePath.join(source, entry.name), NodePath.join(target, entry.name)] as const
+			if (entry.isDirectory()) walk(...pair, false)
+			else if (entry.isFile()) files.push(pair)
+		}
+	}
+	for (const folder of SEEDED_FOLDERS) {
+		if (!NodeFS.existsSync(NodePath.join(from, folder))) continue
+		walk(NodePath.join(from, folder), NodePath.join(to, folder), folder !== 'deps')
+	}
+	let next = 0
+	let failed = false
+	const copy = async () => {
+		while (!failed && next < files.length) {
+			const [source, target] = files[next++]!
+			try {
+				// Windows keeps the file's times, which Cargo compares; elsewhere they are copied over.
+				await NodeFS.promises.copyFile(source, target, NodeFS.constants.COPYFILE_FICLONE)
+				if (process.platform !== 'win32') {
+					const { atime, mtime } = await NodeFS.promises.stat(source)
+					await NodeFS.promises.utimes(target, atime, mtime)
+				}
+			} catch (error) {
+				if (isRecord(error) && error.code === 'ENOENT') continue
+				failed = true
+				throw error
+			}
+		}
+	}
+	// Every copy stops before the caller removes the folder.
+	const copies = await Promise.allSettled(Array.from({ length: SEED_COPIES }, copy))
+	const rejected = copies.find((copy) => copy.status === 'rejected')
+	if (rejected) throw rejected.reason
 }
 
 /**
  * What Cargo runs with. `RUSTC_BOOTSTRAP` changes every crate's fingerprint, so one shell that sets
- * it would compile everything again for every checkout, and the next shell without it again.
+ * it would compile everything again, and the next shell without it again.
  */
 function cargoEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const { RUSTC_BOOTSTRAP: _, ...rest } = env
 	return rest
-}
-
-/**
- * One build at a time across every checkout, or gives up with `undefined` once the runner is
- * stopping. Checkouts that share a build output need it: Cargo puts the finished program at the
- * same path for all of them. It also keeps several compiles from taking the whole machine.
- */
-async function lockBuilds(
-	cache: string,
-	label: string,
-	stopped: () => boolean,
-): Promise<(() => void) | undefined> {
-	NodeFS.mkdirSync(cache, { recursive: true })
-	const lock = NodePath.join(cache, BUILD_LOCK)
-	const owner = NodePath.join(lock, 'pid')
-	for (let waited = false; ;) {
-		try {
-			NodeFS.mkdirSync(lock)
-			break
-		} catch (error) {
-			if (!isRecord(error) || error.code !== 'EEXIST') throw error
-		}
-		let stale: boolean
-		try {
-			// A runner that was killed mid-build leaves its lock behind.
-			stale =
-				!processIsRunning(Number(NodeFS.readFileSync(owner, 'utf8'))) ||
-				Date.now() - NodeFS.statSync(lock).mtimeMs > BUILD_LOCK_STALE_MS
-		} catch {
-			// Taken or released this instant.
-			stale = false
-		}
-		if (stale) {
-			NodeFS.rmSync(lock, { recursive: true, force: true })
-			continue
-		}
-		if (!waited) runnerLog('info', `${label} waiting for another build to finish`)
-		waited = true
-		await new Promise((resolve) => setTimeout(resolve, 1_000))
-		if (stopped()) return undefined
-	}
-	NodeFS.writeFileSync(owner, String(process.pid))
-	return () => NodeFS.rmSync(lock, { recursive: true, force: true })
 }
 
 /** Numbered by place in the stack, so the same folder serves whatever a fixture names its App. */

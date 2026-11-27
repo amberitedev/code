@@ -4,10 +4,6 @@ name = "engine"
 version = "1.0.0-local"
 edition.workspace = true
 
-# The self dev-dependency only turns on a feature, so no code names it.
-[package.metadata.cargo-shear]
-ignored = ["engine"]
-
 [dependencies]
 anyhow = { workspace = true }
 async-minecraft-ping = { workspace = true, features = ["srv"] }
@@ -118,9 +114,6 @@ whoami = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-contracts = { workspace = true, features = ["export-ts"] }
-# Turns `export-ts` on for the engine's own tests, which write its TypeScript.
-engine = { path = ".", features = ["export-ts"] }
 http-body-util = "0.1.3"
 tower = { version = "0.5.2", features = ["util"] }
 
