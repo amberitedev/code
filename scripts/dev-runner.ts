@@ -38,8 +38,7 @@ const PORT_PROBE_HOSTS = ['127.0.0.1', '::1'] as const
 const UP_WAIT_MS = 9 * 60_000
 // One cached program per distinct set of Rust inputs. Older ones are deleted.
 const CACHED_PROGRAMS = 6
-// In the primary checkout's `target`: the latest test runs that passed, by everything that went
-// into them, from any checkout.
+// In a checkout's build output: the latest test runs that passed, by everything that went into them.
 const PASSED_TESTS = 'passed-tests.json'
 const PASSED_TEST_RUNS = 200
 // In a checkout's build output: rewritten as each Cargo run starts, and one `<name>.<pid>.<id>`
@@ -895,10 +894,11 @@ async function runTests(
 			.update(JSON.stringify(Object.entries(env).sort(([a], [b]) => (a < b ? -1 : 1))))
 			.digest('hex')
 			.slice(0, 20)
-	const passedFile = NodePath.join(paths.primary, 'target', PASSED_TESTS)
+	const passedFile = NodePath.join(build.targetDir, PASSED_TESTS)
 	const passed = (): ReadonlyArray<string> => {
 		try {
-			return JSON.parse(NodeFS.readFileSync(passedFile, 'utf8'))
+			const record: unknown = JSON.parse(NodeFS.readFileSync(passedFile, 'utf8'))
+			return Array.isArray(record) ? record.filter((key) => typeof key === 'string') : []
 		} catch {
 			return []
 		}
@@ -930,11 +930,7 @@ async function runTests(
 		if (await runCargo(spec, build, new Set(), build.cargoArgs)) result = 'ok'
 		// An input edited during the run may not be what was tested.
 		if (result === 'ok' && programKey(paths.worktree, build) === key) {
-			try {
-				writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
-			} catch {
-				// Another checkout wrote it this instant; this pass is only not remembered.
-			}
+			writeRecord(passedFile, [passKey(key), ...passed()].slice(0, PASSED_TEST_RUNS))
 		}
 		return result === 'ok'
 	} finally {
@@ -1459,8 +1455,8 @@ async function runCargo(
 		`${CARGO_RUNNING}.${process.pid}.${NodeCrypto.randomUUID()}`,
 	)
 	NodeFS.writeFileSync(running, '')
-	NodeFS.writeFileSync(NodePath.join(build.targetDir, CARGO_STARTED), NodeCrypto.randomUUID())
 	try {
+		NodeFS.writeFileSync(NodePath.join(build.targetDir, CARGO_STARTED), NodeCrypto.randomUUID())
 		const child = NodeChildProcess.spawn('cargo', args, {
 			cwd: build.cwd,
 			detached: process.platform !== 'win32',
@@ -1588,7 +1584,11 @@ function cargoRunning(targetDir: string): boolean {
 			running ||= name === CARGO_RUNNING
 			continue
 		}
-		NodeFS.rmSync(file, { force: true, recursive: true })
+		try {
+			NodeFS.rmSync(file, { force: true, recursive: true })
+		} catch {
+			// Held open for a moment, as Windows does: a later run removes it.
+		}
 	}
 	return running
 }
@@ -2074,8 +2074,9 @@ function processIsRunning(pid: number): boolean {
 	try {
 		process.kill(pid, 0)
 		return true
-	} catch {
-		return false
+	} catch (error) {
+		// Running, as another user or elevated.
+		return isRecord(error) && error.code === 'EPERM'
 	}
 }
 

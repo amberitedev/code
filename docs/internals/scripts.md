@@ -108,9 +108,9 @@ that names itself as a dev-dependency breaks that: Cargo then compiles its libra
 with that dependency's features, before its tests can start. The engine's tests turn on its
 `export-ts` feature through the runner (and CI's `amberite-app/export-ts`) instead.
 
-The primary checkout's `target/passed-tests.json` keeps the keys of the last test runs that
-passed in any checkout: the inputs the test build is keyed by, plus the environment the tests ran
-in. A run with a key in it passes without Cargo.
+`target/dev/passed-tests.json` keeps the keys of the last test runs that passed: the inputs the
+test build is keyed by, plus the environment the tests ran in. A run with a key in it passes
+without Cargo.
 
 Each checkout compiles into its own `target/dev`, so builds never wait on each other or replace
 each other's output, and Cargo runs in the checkout itself. They run at below-normal priority, so
