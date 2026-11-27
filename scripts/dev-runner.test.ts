@@ -216,7 +216,14 @@ describe('dev runner stack', () => {
 		const lock = NodePath.join(scratch, 'fixture.lock')
 		try {
 			const first = await fixtureTurn(scratch)
-			const second = fixtureTurn(scratch)
+			let taken = false
+			const second = fixtureTurn(scratch).then((release) => {
+				taken = true
+				return release
+			})
+			// A turn taken at once would have resolved by now.
+			await Promise.resolve()
+			expect(taken).toBe(false)
 			expect(NodeFS.readFileSync(lock, 'utf8')).toBe(String(process.pid))
 			first()
 			;(await second)()

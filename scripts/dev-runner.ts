@@ -879,11 +879,18 @@ export function parseInput(args: ReadonlyArray<string>): RunnerInput {
 /** Copies everything the runner and its programs print to `.data/dev.log`, for other commands to point at. */
 function logToFile(paths: WorktreePaths): void {
 	NodeFS.mkdirSync(paths.data, { recursive: true })
-	const log = NodeFS.openSync(devLogPath(paths), 'w')
+	let log: number | undefined = NodeFS.openSync(devLogPath(paths), 'w')
 	for (const stream of [process.stdout, process.stderr]) {
 		const write = stream.write
 		stream.write = function (this: NodeJS.WriteStream, chunk: string | Uint8Array) {
-			NodeFS.writeSync(log, typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+			// A throw here would end the runner before it stops its programs, so the copy is dropped.
+			try {
+				if (log !== undefined) {
+					NodeFS.writeSync(log, typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+				}
+			} catch {
+				log = undefined
+			}
 			return Reflect.apply(write, this, arguments)
 		} as typeof stream.write
 	}
@@ -2273,9 +2280,10 @@ function programPorts(runtime: RuntimeFile): ReadonlyMap<string, number> {
 async function runtimeIsReady(runtime: RuntimeFile): Promise<boolean> {
 	const expected = (label: string) => runtime.programs[label] !== 'stopped'
 	const ports = [...programPorts(runtime)].filter(([label]) => expected(label))
+	// Read before the first wait: the runner asks this of its own record, which a fixture replaces.
+	const apps = runtime.apps.filter((app) => expected(`app:${app.index}`))
 	const open = await Promise.all(ports.map(([, port]) => portIsOpen(port)))
 	if (!open.every(Boolean)) return false
-	const apps = runtime.apps.filter((app) => expected(`app:${app.index}`))
 	const answering = await Promise.all(apps.map((app) => appAnswers(app.tabUrl)))
 	if (!answering.every(Boolean)) return false
 	return apps.length === 0 || appPageLoads(runtime.urls.app)
@@ -2405,9 +2413,10 @@ async function waitUntilReady(paths: WorktreePaths): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 500))
 	}
 	const stack = connectStack(paths)
+	const until = Date.now() + READY_WAIT_MS
 	try {
-		await untilStarted(stack.runner.runtime)
-		await stack.ready()
+		await untilStarted(stack.runner.runtime, until)
+		await stack.ready(until)
 	} catch (error) {
 		if (!(error instanceof StillStarting)) throw error
 		runnerLog('warning', `${error.message} Run vp run status --wait again to keep waiting.`)
@@ -2459,11 +2468,13 @@ function fixtureLockPath(data: string): string {
 }
 
 /**
- * Waits until the stack's first start is done, failing after `READY_WAIT_MS`. Until then the runner
+ * Waits until the stack's first start is done, failing at `deadline`. Until then the runner
  * starts its own stack, which would replace any data put in before it.
  */
-async function untilStarted(runtime: () => RuntimeFile | undefined): Promise<void> {
-	const deadline = Date.now() + READY_WAIT_MS
+async function untilStarted(
+	runtime: () => RuntimeFile | undefined,
+	deadline = Date.now() + READY_WAIT_MS,
+): Promise<void> {
 	let told = false
 	for (;;) {
 		// The runner rewrites its file as it works, so one read can come back empty.
@@ -2515,7 +2526,8 @@ export async function holdStack(
 	runnerLog('info', `Started a stack for this run. It stops when the run ends.`)
 	return {
 		release: async () => {
-			sendRunnerCommand(paths, 'quit')
+			// Once it has exited, the command file is another runner's.
+			if (running) sendRunnerCommand(paths, 'quit')
 			await exited
 		},
 	}
@@ -2550,8 +2562,7 @@ export function connectStack(paths: WorktreePaths) {
 			worktree: paths.worktree,
 		},
 		/** Resolves once everything that is meant to run answers. */
-		async ready(): Promise<RuntimeFile> {
-			const deadline = Date.now() + READY_WAIT_MS
+		async ready(deadline = Date.now() + READY_WAIT_MS): Promise<RuntimeFile> {
 			for (;;) {
 				// The runner rewrites its file as it works, so one read can come back empty.
 				const current = runtime()
