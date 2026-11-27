@@ -33,15 +33,16 @@ export type CoreOwner = { id: string, username: string, };
 
 export type StateReport = { version: string, 
 /**
- * Where the App reaches this Core on its own network, `https://ip:port`.
+ * Where this Core is on its own network, `https://ip:port`. The App connects there when it
+ * is on that network, and the store answers there.
  */
 address: string, 
 /**
- * Where the App reaches it from outside, once known.
+ * Where its store is reached from outside, once known.
  */
 public_address: string | null, 
 /**
- * SHA-256 of the TLS certificate, lowercase hex. The App pins it.
+ * SHA-256 of the Core's certificate, lowercase hex: the only program the App connects to.
  */
 cert_fingerprint: string, };
 
@@ -119,14 +120,34 @@ address: string,
  */
 public_address: string | null, 
 /**
- * SHA-256 of the certificate this Core serves HTTPS with. The App trusts only this
- * certificate for this Core. Null for a Core that does not serve HTTPS yet.
+ * SHA-256 of this Core's certificate. The App connects only to the program that holds it.
+ * Null for a Core that has not reported one yet.
  */
 cert_fingerprint: string | null, created: string, last_seen: string, };
 
 export type CoreTicket = { ticket: string, };
 
 export type CoreId = { id: string, };
+
+export type Dialer = { 
+/**
+ * SHA-256 of the certificate it will show, lowercase hex.
+ */
+id: string, 
+/**
+ * Where it might be reached, `ip:port` on UDP, best first. At most eight.
+ */
+candidates: Array<string>, };
+
+export type Listener = { candidates: Array<string>, };
+
+export type Introduction = { 
+/**
+ * Names the answer.
+ */
+request: string, dialer: Dialer, };
+
+export type Introduced = { request: string, candidates: Array<string>, };
 
 export type NewServerShare = { name: string, 
 /**
@@ -155,6 +176,8 @@ export const cores = {
 	ApproveSignInCode: { method: "POST", path: "/cores/approve", auth: "account", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, EnteredCode, ApprovedCore>,
 	ListCores: { method: "GET", path: "/cores", auth: "account", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<ListedCore>>,
 	IssueTicket: { method: "POST", path: "/cores/{id}/ticket", auth: "account", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<CoreId, null, void, CoreTicket>,
+	LinkCore: { method: "GET", path: "/core/link", auth: "core_key", dangerous: false, untimed: false, body: "empty", response: "upgrade" } as Endpoint<null, null, void, { receive: Introduction, send: Introduced }>,
+	Introduce: { method: "POST", path: "/cores/{id}/introduce", auth: "account", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<CoreId, null, Dialer, Listener>,
 	RemoveCore: { method: "DELETE", path: "/cores/{id}", auth: "account", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<CoreId, null, void, void>,
 	Keys: { method: "GET", path: "/core/keys.json", auth: "none", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, PublicKeys>,
 }

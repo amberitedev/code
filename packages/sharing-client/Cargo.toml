@@ -11,6 +11,8 @@ edition.workspace = true
 base64 = { workspace = true }
 bytes = { workspace = true }
 chacha20poly1305 = { workspace = true }
+# TLS pinned to a Core, and which IPs are public (`net`).
+connect = { workspace = true }
 contracts = { workspace = true, features = ["client"] }
 futures = { workspace = true }
 hex = { workspace = true }

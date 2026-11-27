@@ -79,14 +79,15 @@ pub async fn status(client: &Client) -> Result<Output> {
         ));
     }
     lines.extend(machine.warning.clone());
-    if let Some(api) = &machine.api_reachability
-        && api.state == Reach::Unreachable
+    if let Some(store) = &machine.store_reachability
+        && store.state == Reach::Unreachable
     {
         lines.push(format!(
-            "The App cannot reach Core from the internet: {}",
-            api.title
+            "Shared files kept on this Core cannot be fetched from the internet: {}",
+            store.title
         ));
-        lines.extend(api.next_step.iter().map(|step| format!("Next: {step}")));
+        lines
+            .extend(store.next_step.iter().map(|step| format!("Next: {step}")));
     }
     lines.push(servers::table(&servers));
     Ok(Output::new(

@@ -30,18 +30,24 @@ const ModrinthClient = isNativeWindow ? TauriModrinthClient : GenericModrinthCli
 export const apiClient: AbstractModrinthClient = new ModrinthClient({
 	userAgent: async () => `amberite/${await getVersion()}`,
 	labrinthBaseUrl: config.labrinthBaseUrl,
-	// A Core's own certificate is checked in Rust; the WebView talks to the App's Core proxy
-	// instead, which adds this device's session for the account signed in. The WebView never
-	// holds it.
-	connectCore: async (coreId, address, fingerprint) =>
+	// The connection to a Core is made in Rust, to the holder of its certificate; the WebView talks
+	// to the App's Core proxy instead, which adds this device's session for the account signed in.
+	// The WebView never holds it.
+	connectCore: async (coreId, address, fingerprint, introduced) =>
 		apiClient.local.call(pairedCores.connectCore, {
-			body: { core_id: coreId, account: await account(), address, fingerprint },
+			body: {
+				core_id: coreId,
+				account: await account(),
+				address,
+				fingerprint,
+				introduced: introduced ?? null,
+			},
 		}),
 	coreSessions: {
 		// The App passes on the session as the Core described it.
-		signIn: async (coreId, address, fingerprint, ticket) =>
+		signIn: async (coreId, fingerprint, ticket) =>
 			apiClient.local.call(pairedCores.signInToCore, {
-				body: { core_id: coreId, account: await account(), address, fingerprint, ticket },
+				body: { core_id: coreId, account: await account(), fingerprint, ticket },
 			}),
 		signOut: async (coreId) =>
 			apiClient.local.call(pairedCores.signOutOfCore, {

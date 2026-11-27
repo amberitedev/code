@@ -73,13 +73,22 @@ class FakeClient extends GenericModrinthClient {
 	}
 	public signIns: string[][] = []
 	public hasSession = false
+	/** Whether the platform holds a connection to the Core. The backend's introduction makes one. */
+	public connected = true
 	private tickets = 0
 
 	constructor() {
 		super({
 			labrinthBaseUrl: ACCOUNTS,
 			headers: { Authorization: `Bearer ${ACCOUNT}` },
-			connectCore: async (coreId) => (coreId === CORE.id ? PROXY : 'unknown'),
+			connectCore: async (_coreId, _address, _fingerprint, introduced) => {
+				this.connected ||= introduced !== undefined
+				return {
+					base: PROXY,
+					reached: this.connected ? 'internet' : null,
+					dialer: this.connected ? null : { id: 'cd'.repeat(32), candidates: [] },
+				}
+			},
 			coreSessions: {
 				signIn: async (...args) => {
 					this.signIns.push(args)
@@ -109,6 +118,7 @@ class FakeClient extends GenericModrinthClient {
 		})
 		if (url === `${ACCOUNTS}/cores`) return Response.json([CORE])
 		if (url.endsWith('/ticket')) return Response.json({ ticket: `ticket-${++this.tickets}` })
+		if (url.endsWith('/introduce')) return Response.json({ candidates: ['203.0.113.5:16662'] })
 		if (!url.startsWith(PROXY)) return new Response(null, { status: 204 })
 		const answer = this.answer(this.sent.at(-1)!)
 		if (answer instanceof ModrinthApiError)
@@ -149,9 +159,9 @@ function header(headers: Record<string, string>, name: string) {
 	return Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1]
 }
 
-function coreError(error: ErrorCode) {
-	return new ModrinthApiError('HTTP 401', {
-		statusCode: 401,
+function coreError(error: ErrorCode, statusCode = 401) {
+	return new ModrinthApiError(`HTTP ${statusCode}`, {
+		statusCode,
 		responseData: { error, description: '' },
 	})
 }
@@ -160,7 +170,7 @@ describe('Core sessions', () => {
 	it('signs in with a fresh ticket when this device has no session', async () => {
 		const api = new FakeClient()
 		await api.cores.ensureSession(CORE)
-		expect(api.signIns).toEqual([[CORE.id, CORE.address, CORE.cert_fingerprint, 'ticket-1']])
+		expect(api.signIns).toEqual([[CORE.id, CORE.cert_fingerprint, 'ticket-1']])
 
 		await api.cores.ensureSession(CORE)
 		expect(api.signIns).toHaveLength(1)
@@ -180,6 +190,19 @@ describe('Core sessions', () => {
 		expect(api.toCore().map((request) => request.url)).toEqual([
 			`${PROXY}/servers`,
 			`${PROXY}/servers`,
+			`${PROXY}/sessions`,
+			`${PROXY}/sessions`,
+		])
+	})
+
+	it('connects again and retries a request that found the Core not connected', async () => {
+		const api = new FakeClient()
+		await api.cores.list()
+		api.connected = false
+		api.answers = [coreError('core_offline', 503), []]
+		expect(await api.core(CORE.id).call(core.ListSessions)).toEqual([])
+		expect(api.sent.filter((request) => request.url.endsWith('/introduce'))).toHaveLength(1)
+		expect(api.toCore().map((request) => request.url)).toEqual([
 			`${PROXY}/sessions`,
 			`${PROXY}/sessions`,
 		])

@@ -1,4 +1,5 @@
-//! The proxy against stand-in Cores over real pinned TLS: what reaches a Core, and what does not.
+//! The proxy against stand-in Cores over real connections: what reaches a Core, and what does
+//! not.
 
 use std::convert::Infallible;
 
@@ -15,21 +16,14 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::TokioIo;
-use rustls::{
-    ServerConfig,
-    crypto::ring::default_provider,
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
-};
-use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::mpsc,
 };
-use tokio_rustls::TlsAcceptor;
 
 use super::*;
-use crate::local_api::guard::Guard;
+use crate::local_api::{endpoints::cores::Reached, guard::Guard};
 
 const APP: &str = "tauri://localhost";
 const ACCOUNT_TOKEN: &str = "Bearer mra_the_account_session";
@@ -42,73 +36,61 @@ type Seen = (String, HeaderMap);
 /// A Core on a random port that reports every request it gets. `/ws` switches protocols and
 /// echoes what it is sent. Returns its address, fingerprint, and the reports.
 async fn core() -> (String, String, mpsc::UnboundedReceiver<Seen>) {
-    let made = rcgen::generate_simple_self_signed(vec!["amberite-core".into()])
-        .unwrap();
-    let cert = made.cert.der().to_vec();
-    let fingerprint = Sha256::digest(&cert)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let config =
-        ServerConfig::builder_with_provider(Arc::new(default_provider()))
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .with_no_client_auth()
-            .with_single_cert(
-                vec![CertificateDer::from(cert)],
-                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                    made.signing_key.serialize_der(),
-                )),
-            )
-            .unwrap();
-    let acceptor = TlsAcceptor::from(Arc::new(config));
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let listener = connect::Endpoint::listener(
+        (std::net::Ipv4Addr::LOCALHOST, 0).into(),
+        connect::Identity::generate().unwrap(),
+        &[connect::API],
+        connect::Gate::IntroducedOrLocal,
+    )
+    .unwrap();
     let address = format!("https://{}", listener.local_addr().unwrap());
+    let fingerprint = listener.id().to_string();
     let (seen, reports) = mpsc::unbounded_channel();
     tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            let acceptor = acceptor.clone();
+        while let Some(incoming) = listener.accept().await {
             let seen = seen.clone();
             tokio::spawn(async move {
-                let stream = acceptor.accept(stream).await.unwrap();
-                let service =
-                    service_fn(move |mut request: Request<Incoming>| {
-                        let seen = seen.clone();
-                        async move {
-                            seen.send((
-                                request.uri().to_string(),
-                                request.headers().clone(),
-                            ))
-                            .unwrap();
-                            if request.uri().path() != "/ws" {
-                                return Ok::<_, Infallible>(Response::new(
-                                    Full::<Bytes>::from("ok"),
-                                ));
-                            }
-                            let upgraded = hyper::upgrade::on(&mut request);
-                            tokio::spawn(async move {
-                                let mut socket =
-                                    TokioIo::new(upgraded.await.unwrap());
-                                let mut buffer = [0; 4];
-                                socket.read_exact(&mut buffer).await.unwrap();
-                                socket.write_all(&buffer).await.unwrap();
-                            });
-                            Ok(Response::builder()
-                                .status(StatusCode::SWITCHING_PROTOCOLS)
-                                .header(CONNECTION, "upgrade")
-                                .header(UPGRADE, "websocket")
-                                .body(Full::default())
-                                .unwrap())
-                        }
-                    });
-                let _ = hyper::server::conn::http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service)
-                    .with_upgrades()
-                    .await;
+                let connection = incoming.accept().await.unwrap();
+                while let Some(stream) = connection.accept().await {
+                    tokio::spawn(serve(stream, seen.clone()));
+                }
             });
         }
     });
     (address, fingerprint, reports)
+}
+
+/// One HTTP connection of a stand-in Core.
+async fn serve(stream: connect::Stream, seen: mpsc::UnboundedSender<Seen>) {
+    let service = service_fn(move |mut request: Request<Incoming>| {
+        let seen = seen.clone();
+        async move {
+            seen.send((request.uri().to_string(), request.headers().clone()))
+                .unwrap();
+            if request.uri().path() != "/ws" {
+                return Ok::<_, Infallible>(Response::new(
+                    Full::<Bytes>::from("ok"),
+                ));
+            }
+            let upgraded = hyper::upgrade::on(&mut request);
+            tokio::spawn(async move {
+                let mut socket = TokioIo::new(upgraded.await.unwrap());
+                let mut buffer = [0; 4];
+                socket.read_exact(&mut buffer).await.unwrap();
+                socket.write_all(&buffer).await.unwrap();
+            });
+            Ok(Response::builder()
+                .status(StatusCode::SWITCHING_PROTOCOLS)
+                .header(CONNECTION, "upgrade")
+                .header(UPGRADE, "websocket")
+                .body(Full::default())
+                .unwrap())
+        }
+    });
+    let _ = hyper::server::conn::http1::Builder::new()
+        .serve_connection(TokioIo::new(stream), service)
+        .with_upgrades()
+        .await;
 }
 
 /// The App's Core proxy on a random port, with no tunnels yet.
@@ -129,7 +111,7 @@ async fn proxy() -> Proxy {
 
 impl Proxy {
     /// Connects to the Core at `address` signing with `token`; returns the tunnel's path.
-    fn tunnel(
+    async fn tunnel(
         &self,
         address: &str,
         fingerprint: &str,
@@ -140,10 +122,23 @@ impl Proxy {
             core_id: address.into(),
         };
         self.cores.sessions.cache(&key, token);
-        let base = self
+        let route = self
             .cores
-            .connect(key, address.into(), fingerprint.into())
+            .connect(CoreTarget {
+                core_id: key.core_id,
+                account: key.account,
+                fingerprint: fingerprint.into(),
+                address: address.into(),
+                introduced: None,
+            })
+            .await
             .unwrap();
+        assert_eq!(route.reached, Some(Reached::Local));
+        self.path(&route.base)
+    }
+
+    /// The path of a proxy URL.
+    fn path(&self, base: &str) -> String {
         base.strip_prefix(&format!("http://127.0.0.1:{}", self.port))
             .unwrap()
             .to_owned()
@@ -175,7 +170,7 @@ async fn one_core(
 ) -> (Proxy, String, mpsc::UnboundedReceiver<Seen>) {
     let (address, fingerprint, reports) = core().await;
     let proxy = proxy().await;
-    let tunnel = proxy.tunnel(&address, &fingerprint, token);
+    let tunnel = proxy.tunnel(&address, &fingerprint, token).await;
     (proxy, tunnel, reports)
 }
 
@@ -404,9 +399,12 @@ async fn one_local_connection_reaches_each_core_with_its_session() {
     let proxy = proxy().await;
     let (one, one_fingerprint, mut one_reports) = core().await;
     let (other, other_fingerprint, mut other_reports) = core().await;
-    let to_one = proxy.tunnel(&one, &one_fingerprint, Some("one-session"));
-    let to_other =
-        proxy.tunnel(&other, &other_fingerprint, Some("other-session"));
+    let to_one = proxy
+        .tunnel(&one, &one_fingerprint, Some("one-session"))
+        .await;
+    let to_other = proxy
+        .tunnel(&other, &other_fingerprint, Some("other-session"))
+        .await;
     assert_ne!(to_one, to_other);
 
     let stream = TcpStream::connect(("127.0.0.1", proxy.port)).await.unwrap();
@@ -445,9 +443,35 @@ async fn one_local_connection_reaches_each_core_with_its_session() {
 async fn connecting_again_reuses_the_tunnel() {
     let (address, fingerprint, _reports) = core().await;
     let proxy = proxy().await;
-    let tunnel = proxy.tunnel(&address, &fingerprint, None);
+    let tunnel = proxy.tunnel(&address, &fingerprint, None).await;
     assert_eq!(tunnel, format!("/{SECRET}/core/0"));
-    assert_eq!(proxy.tunnel(&address, &fingerprint, None), tunnel);
+    assert_eq!(proxy.tunnel(&address, &fingerprint, None).await, tunnel);
+}
+
+/// The frontend sends such a request again once the backend introduced it to the Core, which is
+/// only safe because nothing was sent.
+#[tokio::test]
+async fn a_core_with_no_connection_answers_offline() {
+    let proxy = proxy().await;
+    let key = Key {
+        account: "account".into(),
+        core_id: "core".into(),
+    };
+    let core = connect::Identity::generate().unwrap().id();
+    let (n, _) = proxy.cores.tunnel_to(key, core);
+    let response = proxy
+        .send(
+            proxy
+                .get(&format!("/{SECRET}/core/{n}/servers"))
+                .header(ORIGIN, APP)
+                .body(Empty::new())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: ApiError = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error.error, ErrorCode::CoreOffline);
 }
 
 #[tokio::test]

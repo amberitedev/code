@@ -8,6 +8,7 @@ import { coreRoutes } from './cores'
 import { devRoutes } from './dev'
 import { handleSharing } from './sharing'
 import { socialRoutes } from './social'
+export { CoreLink } from './cores/link'
 export { CoreSignIn } from './cores/sign-in'
 export { FriendsHub } from './social/socket'
 

@@ -31,8 +31,8 @@ engine's `.env`. It copies no data: the first dev start applies the default
 again. `.data/setup.json` records
 whether it is `running` (with its `pid`), `done`, or `failed` (with an `error`). Any exit,
 including Ctrl+C, writes the final state; a hard kill cannot, so a `running` file whose `pid` is
-gone means setup died. Rust is not built here: `dev` builds what it needs, and with the shared build
-folder that is usually nothing.
+gone means setup died. Rust is not built here: `dev` builds what it needs, and with the shared program
+cache that is usually nothing.
 
 ## Dev
 
@@ -47,9 +47,9 @@ folder that is usually nothing.
 | `vp run scenarios:prove <file>`              | Runs one scenario here and on the merge base with `origin/main`, and passes only when it fails there and passes here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `vp run gen:ts [--check]`                    | Writes the TypeScript in `packages/contracts/ts` that the Rust crates generate, by running only their `ts_is_up_to_date` tests. `--check` compares instead.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `vp run sqlx:prepare`                        | Writes `packages/engine/.sqlx` and `apps/app/.sqlx` again from each crate's migrations, after a query or a migration changed. It checks in this checkout's `target`.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `vp run check:changed [ref]`                 | CI's fast checks for the files changed since the merge base with `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a changed file (except the ones CI leaves out). The steps run at once, each one's output printed whole when it finishes. typos and tombi are skipped when not installed.                                                                                                                                                                                                   |
-| `node scripts/dev-runner.ts build`           | Compiles the App and Core for this checkout's Rust without starting anything. `check:changed` runs it when Rust changed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `node scripts/dev-runner.ts test <crate>...` | One `cargo test` of the given crates in the shared build folder, with the programs' packages and features, so it compiles only the tested crates' own tests. Doc tests are left to CI. `check:changed` runs it for the crates with a changed file.                                                                                                                                                                                                                                                                                                                                                                  |
+| `vp run check:changed [ref]`                 | CI's fast checks for the files changed since the merge base with `origin/main` (or `ref`): lint, typos, TOML, typecheck and tests of the affected packages, and for Rust `rustfmt`, a build, and the tests of every workspace crate with a changed file (except the ones CI leaves out). The steps run at once, each one's output printed whole when it finishes. A vp step that passed on exactly these files, installed packages and environment is not run again; `.data/check-passed.json` holds what passed. typos and tombi are skipped when not installed. |
+| `node scripts/dev-runner.ts build`           | Compiles the App and Core for this checkout's Rust without starting anything. With `--test <crate>` (repeatable), then tests those crates. `check:changed` runs it when Rust changed.                                                                                                                                                                                                                                                                                                                                                                             |
+| `node scripts/dev-runner.ts test <crate>...` | One `cargo test` of the given crates in the checkout's build folder, with the programs' packages and features, so it compiles only the tested crates' own tests. A tested crate's `export-ts` feature is on, as in CI. A run whose inputs and environment match one that passed is not run again. Doc tests are left to CI. `check:changed` runs it for the crates with a changed file.                                                                                                                                                                           |
 
 A stack belongs to whoever started it. On Windows, `vp run` keeps its command and everything it
 starts in a job that ends with it and that no process may leave, so Ctrl+C, killing the runner,
@@ -72,8 +72,8 @@ Apps sign themselves in to their fixture account, so no sign-in website runs. A 
 shows, raises or focuses a window; agents use it from its browser tab.
 
 `check:changed` builds and tests Rust through `node scripts/dev-runner.ts build` and
-`node scripts/dev-runner.ts test <package>...`, which compile in the primary checkout's
-`target/dev-shared` like every start does.
+`node scripts/dev-runner.ts test <package>...`, which compile in the checkout's `target/dev`
+like every start does.
 
 ## Fixtures
 
@@ -82,8 +82,8 @@ What a fixture is and how to write one: [fixtures](fixtures.md).
 ## Rust programs
 
 The runner builds the App and Core with one `cargo build` and never runs them from the build output.
-Both programs are copied to `<target>/dev-bin/<key>/` and run from there, where `<target>` is the
-primary checkout's `target/dev-shared`; every worktree shares those programs. Built apart, Cargo
+Both programs are copied to the primary checkout's `target/dev-bin/<key>/` and run from there;
+every worktree shares those programs. Built apart, Cargo
 picks dependency features for each on its own and compiles about 250 crates twice, the engine
 among them. The build also passes `--examples`, which builds nothing here but turns on the features
 dev-dependencies add, exactly as a test run does, so tests reuse every crate the programs compiled.
@@ -109,37 +109,25 @@ Nothing watches Rust files. After a Rust edit, apply a fixture again, restart `d
 program with `vp run rs app:1` or `vp run rs core:1`; the key has changed, so
 the runner builds first. If a build fails, the process stays stopped until the next restart.
 
-Builds and test runs go one at a time across every checkout, at below-normal priority, so several
-agents restarting after Rust edits queue up instead of taking the whole machine. A test run holds
-its turn until its tests finish, since another build would replace the test programs.
+A crate's tests should need nothing compiled that the programs do not already compile. A crate
+that names itself as a dev-dependency breaks that: Cargo then compiles its library a second time
+with that dependency's features, before its tests can start. The engine's tests turn on its
+`export-ts` feature through the runner (and CI's `amberite-app/export-ts`) instead.
 
-Every checkout compiles into the primary checkout's `target/dev-shared`, like a pnpm store: each
-third-party crate is compiled once and kept once, whichever checkout needed it first. Only the
-runner compiles there, tests included; a plain `cargo` run, `cargo test` too, uses `target` and
-cannot change what the runner trusts. `cargo clean` in the primary checkout
-deletes `target/dev-shared` too, so every checkout compiles from scratch next time.
+`target/dev/passed-tests.json` keeps the keys of the last test runs that passed: the inputs the
+test build is keyed by, plus the environment the tests ran in. A run with a key in it passes
+without Cargo.
 
-Cargo runs from `<primary>-checkout`, a link (a junction on Windows) that the runner points at the
-checkout it builds while it holds the build turn. Compiled crates then hold the same source paths
-whichever checkout built them, so the compiler's incremental state carries over between worktrees
-(an App edit in a new worktree compiles about as fast as in the last one), and build scripts that
-record absolute paths, such as tauri's, do not see a changed crate. Compiler messages name the
-real checkout. A crate that reads a file outside its own folder records it by that link too, but
-the runner does not date such a file, so keep embedded files inside the crate.
-
-Cargo decides what to recompile from file times alone, so in a shared folder a crate last compiled
-from another checkout can look finished here. `target/dev-shared/built-crates.json` records, for
-each crate in the repo, the content it was last compiled from: as the programs compile it, which
-is also how a test run compiles every crate it does not test, and as each set of tested crates
-compiles its own tests. Before a build, a crate that matches gets its files and folders dated 2000,
-so Cargo keeps its output; any other crate gets the current time, so Cargo compiles it again.
-Inputs outside every crate folder, such as the App's version in `apps/app-frontend/package.json`,
-count toward the App's own crate, in its tests too. A crate compiled again, even from the same
-content, is newer than the compiled crates that use it, so the next build compiles those again as
-well.
-
-An older checkout that still runs its App from `target/dev-shared/debug` holds that file open; the runner
-renames it aside and builds again.
+Each checkout compiles into its own `target/dev`, so builds never wait on each other or replace
+each other's output, and Cargo runs in the checkout itself. They run at below-normal priority, so
+several at once stay behind what the person is doing. A new `target/dev` starts as a copy of the
+third-party crates (`deps`, `build` and `.fingerprint`) of the checkout that ran Cargo last, so
+only this repo's crates compile: their fingerprints are left out, since their output there came
+from another checkout's files. tauri's are left out too, because its build script lists the files
+in its output folder by absolute path. On a ReFS Dev Drive each copied file is a block clone,
+which takes no disk space until one side changes. A source that runs Cargo during the copy may be
+half written, so the runner marks each Cargo run in progress (`cargo-running.<pid>.*`) and drops
+the copy when a run started meanwhile. A plain `cargo` run uses `target` as usual.
 
 The App signs in to a Core with a ticket
 on its first request and keeps that session in the OS keychain; set `CORE_PROXY_LOG=1` before
@@ -259,17 +247,18 @@ lists the other commands.
 ## Timings
 
 Setup, every Rust build and test run, every `dev` start on the checkout's data, and every applied
-fixture (the one a `dev` with a fixture applies too) append one JSON line to the primary checkout's `.data/timings.jsonl`, shared by all checkouts. Each line has `kind`
-(`setup`, `build`, `test`, `dev`, `fixture`), the worktree, the result, and milliseconds per step:
-`install` for setup, `lockWait` and `compile` plus the number of repo crates compiled again for a
-build, the same plus `test` and the tested crates for a test run, and the wait until ready for
-`dev` and `fixture`. It records what happened, under whatever else the machine was doing.
+fixture (the one a `dev` with a fixture applies too) append one JSON line to the primary checkout's
+`.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `test`, `dev`,
+`fixture`), the worktree, the result, and milliseconds per step: `install` for setup, `total` for a
+build, `compile` and `test` plus the tested crates for a test run, and the wait until ready for `dev`
+and `fixture`. It records what happened, under whatever else the machine was doing. Build and test
+lines also carry Cargo's `--timings` seconds per repo crate, and third-party crates as one total.
 
 To check whether a change to the dev setup made it faster, run `node scripts/dev-bench.ts`. It
 times the agent loop (a new worktree's setup, `dev` until the App is usable, `check:changed`) for a
 cold start, one-line UI, App, App and Core, and contracts edits, an edit-and-restart in a running
 worktree, and two worktrees at once. It benchmarks this checkout's files in a clone at
-`<primary>-bench` with its own build folder and empty data, so it never touches shared builds.
+`<primary>-bench` with its own build folders and empty data, so it never touches shared builds.
 Scenarios start from the snapshot already built, tested and typechecked, as agents keep `main`
 warm in practice. The default run is the quick scenarios (about 10 minutes); `--full` runs all
 (about 40 minutes, most of it the cold start). The score is 100 when every scenario meets its

@@ -4,9 +4,16 @@
 //! `core_removed`, and the Core un-pairs. The App lists the account's Cores, approves codes and
 //! gets the tickets it signs in to a Core with.
 //!
+//! Nobody connects to a Core at an address they looked up: the backend introduces them. A Core
+//! holds a WebSocket to the backend ([`LinkCore`]). An App that wants to reach it sends where it
+//! might be found itself ([`Introduce`]); the backend passes that to the Core over the socket and
+//! answers with where the Core is. Both then connect directly (the `connect` crate).
+//!
 //! A Core reaches shares with its key on `/core/shares`, acting for its owner: it writes the share
 //! of a server that follows no instance, and reads any share its owner reads, so a server can
 //! follow one.
+
+use std::net::SocketAddr;
 
 use chrono::{DateTime, Utc};
 use modrinth_content_management::icons::IconConfig;
@@ -64,11 +71,12 @@ pub struct CoreOwner {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct StateReport {
     pub version: String,
-    /// Where the App reaches this Core on its own network, `https://ip:port`.
+    /// Where this Core is on its own network, `https://ip:port`. The App connects there when it
+    /// is on that network, and the store answers there.
     pub address: String,
-    /// Where the App reaches it from outside, once known.
+    /// Where its store is reached from outside, once known.
     pub public_address: Option<String>,
-    /// SHA-256 of the TLS certificate, lowercase hex. The App pins it.
+    /// SHA-256 of the Core's certificate, lowercase hex: the only program the App connects to.
     pub cert_fingerprint: String,
 }
 
@@ -164,8 +172,8 @@ pub struct ListedCore {
     pub address: String,
     /// Where this Core is on the internet, once it has proven it can be reached there.
     pub public_address: Option<String>,
-    /// SHA-256 of the certificate this Core serves HTTPS with. The App trusts only this
-    /// certificate for this Core. Null for a Core that does not serve HTTPS yet.
+    /// SHA-256 of this Core's certificate. The App connects only to the program that holds it.
+    /// Null for a Core that has not reported one yet.
     pub cert_fingerprint: Option<String>,
     pub created: DateTime<Utc>,
     pub last_seen: DateTime<Utc>,
@@ -182,6 +190,40 @@ pub struct CoreTicket {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct CoreId {
     pub id: String,
+}
+
+/// Body of [`Introduce`]: the device that wants to connect.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Dialer {
+    /// SHA-256 of the certificate it will show, lowercase hex.
+    pub id: String,
+    /// Where it might be reached, `ip:port` on UDP, best first. At most eight.
+    pub candidates: Vec<SocketAddr>,
+}
+
+/// Where a Core might be reached, `ip:port` on UDP, best first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Listener {
+    pub candidates: Vec<SocketAddr>,
+}
+
+/// What the backend sends a Core on [`LinkCore`]: a device its owner's App vouches for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Introduction {
+    /// Names the answer.
+    pub request: String,
+    pub dialer: Dialer,
+}
+
+/// What a Core answers an [`Introduction`] with on [`LinkCore`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Introduced {
+    pub request: String,
+    pub candidates: Vec<SocketAddr>,
 }
 
 /// Body of [`CreateServerShare`].
@@ -241,6 +283,12 @@ crate::endpoints! {
     ListCores: Get "/cores", Account, (), (), Empty => Json<Vec<ListedCore>>;
     /// App: a session ticket for one of the account's Cores.
     IssueTicket: Post "/cores/{id}/ticket", Account, CoreId, (), Empty => Json<CoreTicket>;
+    /// Core: a WebSocket held for as long as it runs, so it can be introduced to a dialer at any
+    /// time. It costs nothing while nothing is sent.
+    LinkCore: Get "/core/link", CoreKey, (), (), Empty => Upgrade<Introduction, Introduced>;
+    /// App: introduce this device to one of the account's Cores, and learn where the Core is. 503
+    /// `core_offline` when the Core holds no link or does not answer.
+    Introduce: Post "/cores/{id}/introduce", Account, CoreId, (), Json<Dialer> => Json<Listener>;
     /// App: the owner takes a Core off the account. Its key stops working at once.
     RemoveCore: Delete "/cores/{id}", Account, CoreId, (), Empty => Empty;
     /// The backend's ticket keys. A static file, refetched daily and when a ticket names an unknown
@@ -270,6 +318,10 @@ pub(crate) fn ts() -> String {
         ListedCore::decl(&cfg),
         CoreTicket::decl(&cfg),
         CoreId::decl(&cfg),
+        Dialer::decl(&cfg),
+        Listener::decl(&cfg),
+        Introduction::decl(&cfg),
+        Introduced::decl(&cfg),
         NewServerShare::decl(&cfg),
     ]
     .map(|declaration| format!("\nexport {declaration}\n"))

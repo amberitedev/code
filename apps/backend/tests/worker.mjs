@@ -32,6 +32,7 @@ export async function startBackend(name, bindings = {}) {
 		durableObjects: {
 			FRIENDS: { className: 'FriendsHub', useSQLite: true },
 			CORE_SIGN_IN: { className: 'CoreSignIn', useSQLite: true },
+			CORE_LINK: { className: 'CoreLink', useSQLite: true },
 		},
 		bindings: { LOCAL_DEV: 'true', ...bindings },
 	})

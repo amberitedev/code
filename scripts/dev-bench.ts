@@ -13,7 +13,7 @@
 // Scenarios not run keep their last result in the score, marked with the snapshot they ran on.
 //
 // It benchmarks this checkout's current files, uncommitted ones included, in a sandbox: a clone
-// of the primary checkout at `<primary>-bench` (or BENCH_ROOT) with its own shared build folder,
+// of the primary checkout at `<primary>-bench` (or BENCH_ROOT) with its own build folders,
 // timings log and data. It never touches the primary's builds or data. Scenarios start from empty
 // development data, which every service creates on its own: a copied dataset ties the result to
 // whatever schema the primary's data happens to have. Results go to `<root>/results.jsonl`;
@@ -80,7 +80,8 @@ const SCENARIOS = {
 		target: 600,
 		about: 'new worktree, nothing compiled anywhere: setup, dev',
 		run: async (bench) => {
-			wipe(NodePath.join(bench.primary, 'target', 'dev-shared'))
+			wipe(NodePath.join(bench.primary, 'target', 'dev'))
+			wipe(NodePath.join(bench.primary, 'target', 'dev-bin'))
 			return bench.worktree('cold', [], { check: false })
 		},
 	},

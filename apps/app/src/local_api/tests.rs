@@ -169,6 +169,8 @@ async fn cores_are_reached_on_the_proxy_port() {
         "account": "account",
         "address": "https://127.0.0.1:1",
         "fingerprint": "0".repeat(64),
+        // An introduction with nowhere to dial, so the answer comes at once.
+        "introduced": [],
     });
     let request = Request::post(format!("/{}/app/cores/connect", local.secret))
         .header(HOST, &local.host)
@@ -179,9 +181,9 @@ async fn cores_are_reached_on_the_proxy_port() {
     let response = local.send(request).await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let base: String = serde_json::from_slice(&body).unwrap();
+    let route: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
-        base,
+        route["base"],
         format!("{}/{}/core/0", local.proxy_origin, local.secret)
     );
 }
