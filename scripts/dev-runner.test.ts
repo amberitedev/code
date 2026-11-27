@@ -285,8 +285,8 @@ describe('dev runner program cache', () => {
 		expect(programKey(process.cwd(), { ...build, cargoArgs: ['build', '--release'] })).not.toBe(key)
 	})
 
-	it('trusts shared output per build and content, from any checkout', () => {
-		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+	/** Checkouts of a two-crate workspace sharing one build output, and the builds they run. */
+	const sharedBuilds = (scratch: string) => {
 		const library = (checkout: string) => NodePath.join(checkout, 'packages', 'a', 'src', 'lib.rs')
 		const checkout = (name: string) => {
 			const dir = NodePath.join(scratch, name)
@@ -320,6 +320,18 @@ describe('dev runner program cache', () => {
 			shared: program.inputs,
 			tested: ['packages/a'],
 		}
+		/** Why each crate compiles, recorded as if the build succeeded. */
+		const rebuilt = (worktree: string, build: typeof program | typeof tests) => {
+			const prepared = prepareCheckoutCrates(worktree, build)
+			prepared.recordBuilt()
+			return prepared.rebuilt
+		}
+		return { checkout, library, program, rebuilt, tests }
+	}
+
+	it('trusts shared output per build and content, from any checkout', () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const { checkout, library, program, rebuilt, tests } = sharedBuilds(scratch)
 		const programTests = {
 			...tests,
 			inputs: program.inputs,
@@ -333,11 +345,8 @@ describe('dev runner program cache', () => {
 			tested: ['packages/a', 'packages/app'],
 		}
 		/** How many crates the build compiles, recorded as if it succeeded. */
-		const compiles = (worktree: string, build: typeof program | typeof tests) => {
-			const prepared = prepareCheckoutCrates(worktree, build)
-			prepared.recordBuilt()
-			return prepared.changed
-		}
+		const compiles = (worktree: string, build: typeof program | typeof tests) =>
+			Object.keys(rebuilt(worktree, build)).length
 		try {
 			const here = checkout('here')
 			const there = checkout('there')
@@ -364,6 +373,33 @@ describe('dev runner program cache', () => {
 			// Compiling other content anywhere ends every build's trust in what it replaced.
 			expect(compiles(there, both)).toBe(1)
 			expect(compiles(here, tests)).toBe(1)
+		} finally {
+			NodeFS.rmSync(scratch, { force: true, recursive: true })
+		}
+	})
+
+	it('says why each crate compiles again', () => {
+		const scratch = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 'dev-runner-'))
+		const { checkout, library, program, rebuilt, tests } = sharedBuilds(scratch)
+		try {
+			const here = checkout('here')
+			const there = checkout('there')
+			expect(rebuilt(here, program)).toEqual({
+				'packages/a': { reason: 'unrecorded' },
+				'packages/app': { reason: 'unrecorded' },
+			})
+			expect(rebuilt(here, tests)).toEqual({ 'packages/a': { reason: 'other-build' } })
+			NodeFS.writeFileSync(library(there), 'pub fn b() {}')
+			expect(rebuilt(there, program)).toEqual({ 'packages/a': { reason: 'other-checkout' } })
+			expect(rebuilt(here, program)).toEqual({ 'packages/a': { reason: 'other-checkout' } })
+			NodeFS.writeFileSync(library(here), 'pub fn c() {}')
+			NodeFS.writeFileSync(NodePath.join(here, 'packages', 'a', 'src', 'new.rs'), '')
+			expect(rebuilt(here, program)).toEqual({
+				'packages/a': {
+					reason: 'edited',
+					files: ['packages/a/src/lib.rs', 'packages/a/src/new.rs'],
+				},
+			})
 		} finally {
 			NodeFS.rmSync(scratch, { force: true, recursive: true })
 		}

@@ -9,7 +9,12 @@ import * as NodePath from 'node:path'
 import * as NodeReadline from 'node:readline'
 import * as NodeURL from 'node:url'
 import * as NodeUtil from 'node:util'
-import { recordTiming } from './timings.ts'
+import {
+	type CargoTimings,
+	recordTiming,
+	summarizeCargoTimings,
+	takeCargoTimings,
+} from './timings.ts'
 
 const BASE_PORTS = {
 	app: 1420,
@@ -37,6 +42,10 @@ const BUILD_LOCK_STALE_MS = 60 * 60_000
 const BUILD_LOCK = 'building'
 // In the shared build output: each repo crate's content when last compiled, and for which programs.
 const BUILT_CRATES = 'built-crates.json'
+// In a checkout's `.data`: each repo crate's files when this checkout last compiled it.
+const OWN_BUILT_FILES = 'built-files.json'
+// The most changed files a timing line names per crate.
+const LOGGED_FILES = 100
 // In the shared build output's record: a crate's output as the programs compile it.
 const PROGRAMS = 'programs'
 // Given to an unchanged crate's files so Cargo trusts its compiled output.
@@ -888,7 +897,7 @@ async function runTests(
 	if (!unlock) return false
 	const lockWait = performance.now() - started
 	let compiled: number | undefined
-	let changedCrates = 0
+	const runs: CompileRun[] = []
 	let result: 'ok' | 'failed' = 'failed'
 	try {
 		let key = programKey(paths.worktree, build)
@@ -901,7 +910,7 @@ async function runTests(
 				[...build.cargoArgs, '--no-run'],
 				key,
 			)
-			changedCrates += run.changed
+			runs.push(run)
 			if (!run.compiled) return false
 			if (run.key === key) break
 			key = run.key
@@ -922,8 +931,7 @@ async function runTests(
 			worktree: paths.worktree,
 			crates,
 			result,
-			// Crates in the repo compiled again; third-party crates are not counted.
-			changedCrates,
+			...compiledDetails(paths.worktree, runs),
 			ms: {
 				lockWait: Math.round(lockWait),
 				compile: Math.round((compiled ?? finished) - started - lockWait),
@@ -1331,14 +1339,14 @@ async function buildProgram(
 		const unlock = await lockBuilds(cache, spec.label, stopped)
 		if (!unlock) return undefined
 		const lockWait = performance.now() - started
-		let changedCrates = 0
+		const runs: CompileRun[] = []
 		let result: 'ok' | 'failed' = 'failed'
 		try {
 			// Another runner may have built it while this one waited.
 			while (!complete(key)) {
 				runnerLog('info', `${spec.label} building ${build.programs.join(', ')} (${key})`)
 				const run = await compileShared(worktree, spec, build, builds, build.cargoArgs, key)
-				changedCrates += run.changed
+				runs.push(run)
 				if (!run.compiled) return undefined
 				if (run.key === key) {
 					NodeFS.mkdirSync(cached(key), { recursive: true })
@@ -1362,8 +1370,7 @@ async function buildProgram(
 				program: build.programs.join(' '),
 				key,
 				result,
-				// Crates in the repo compiled again; third-party crates are not counted.
-				changedCrates,
+				...compiledDetails(worktree, runs),
 				ms: {
 					lockWait: Math.round(lockWait),
 					compile: Math.round(total - lockWait),
@@ -1401,14 +1408,37 @@ async function compileShared(
 	builds: Set<NodeChildProcess.ChildProcess>,
 	args: ReadonlyArray<string>,
 	key: string,
-): Promise<{ readonly changed: number; readonly compiled: boolean; readonly key: string }> {
+): Promise<CompileRun> {
 	const prepared = prepareCheckoutCrates(worktree, build)
-	const compiled = await runCargo(spec, build, builds, args)
+	const compiled = await runCargo(spec, build, builds, [...args, '--timings'])
+	const timings = takeCargoTimings(build.targetDir)
 	const builtKey = programKey(worktree, build)
 	if (builtKey !== key) {
 		NodeFS.rmSync(NodePath.join(build.targetDir, BUILT_CRATES), { force: true })
 	} else if (compiled) prepared.recordBuilt()
-	return { changed: prepared.changed, compiled, key: builtKey }
+	return { rebuilt: prepared.rebuilt, timings, compiled, key: builtKey }
+}
+
+type CompileRun = {
+	readonly rebuilt: Readonly<Record<string, Rebuilt>>
+	readonly timings: CargoTimings | undefined
+	readonly compiled: boolean
+	readonly key: string
+}
+
+/** What a build or test run's timing line says about what compiled and why. */
+function compiledDetails(worktree: string, runs: ReadonlyArray<CompileRun>) {
+	const names = new Set([...localCrates(worktree).values()].map((crate) => crate.name))
+	return {
+		branch: currentBranch(worktree),
+		// Crates in the repo compiled again; third-party crates are not counted.
+		changedCrates: runs.reduce((count, run) => count + Object.keys(run.rebuilt).length, 0),
+		rebuilt: Object.assign({}, ...runs.map((run) => run.rebuilt)),
+		...summarizeCargoTimings(
+			runs.flatMap((run) => (run.timings ? [run.timings] : [])),
+			names,
+		),
+	}
 }
 
 type BuiltCrate = {
@@ -1422,24 +1452,50 @@ type BuiltCrate = {
 }
 
 /**
+ * Why a repo crate compiles again: `edited` when this checkout changed it since its last build here
+ * (`files` names what changed), `other-checkout` when another checkout compiled other content of it
+ * since, `other-build` when only another build kind (programs or a crate's tests) compiled this
+ * content, and `unrecorded` when the shared record has nothing for it.
+ */
+export type Rebuilt =
+	| {
+			readonly reason: 'edited'
+			readonly files: ReadonlyArray<string>
+			readonly moreFiles?: number
+	  }
+	| { readonly reason: 'other-checkout' | 'other-build' | 'unrecorded' }
+
+type LastBuilt = {
+	readonly hash: string
+	readonly files: Readonly<Record<string, string>>
+}
+
+/**
  * Cargo decides whether a crate needs compiling from file times alone, and every checkout shares
  * one build output. So before a build, each crate in the repo is checked against the content it
  * was last compiled from as this build compiles it: as the programs do, or as one crate's tests. A
  * crate that matches gets old file times, folders included, so Cargo keeps its compiled output even
  * though this checkout's files are newer. A crate that differs, or was last compiled for other
- * builds only, gets the current time, so Cargo compiles it again from this checkout. Returns how
- * many crates will compile, and what to record once the build succeeds.
+ * builds only, gets the current time, so Cargo compiles it again from this checkout. Returns the
+ * crates that will compile and why, and what to record once the build succeeds.
  */
 export function prepareCheckoutCrates(
 	worktree: string,
 	build: ProgramBuild | TestBuild,
-): { readonly changed: number; readonly recordBuilt: () => void } {
+): { readonly rebuilt: Readonly<Record<string, Rebuilt>>; readonly recordBuilt: () => void } {
 	const recordFile = NodePath.join(build.targetDir, BUILT_CRATES)
 	let record: Record<string, BuiltCrate> = {}
 	try {
 		record = JSON.parse(NodeFS.readFileSync(recordFile, 'utf8'))
 	} catch {
 		// First build into this folder: every crate compiles.
+	}
+	const lastBuiltFile = NodePath.join(worktree, '.data', OWN_BUILT_FILES)
+	let lastBuilt: Record<string, LastBuilt> = {}
+	try {
+		lastBuilt = JSON.parse(NodeFS.readFileSync(lastBuiltFile, 'utf8'))
+	} catch {
+		// This checkout has not compiled anything yet.
 	}
 	// Test runs compile the crates they do not test exactly as the programs do.
 	const buildName = (folder: string) =>
@@ -1462,9 +1518,9 @@ export function prepareCheckoutCrates(
 		if (folder) files.get(folder)!.push([file, blob])
 		else loose.push([file, blob])
 	}
-	const hashes = new Map<string, string>()
+	const hashes = new Map<string, LastBuilt>()
 	const now = new Date()
-	let changed = 0
+	const rebuilt: Record<string, Rebuilt> = {}
 	for (const [folder, entries] of files) {
 		const hash = NodeCrypto.createHash('sha256')
 		const inputs = own[folder] ?? []
@@ -1478,11 +1534,12 @@ export function prepareCheckoutCrates(
 			hash.update(file).update('\0').update(blob).update('\0')
 		}
 		const digest = hash.digest('hex')
-		hashes.set(folder, digest)
+		const current = { hash: digest, files: Object.fromEntries(hashed) }
+		hashes.set(folder, current)
 		const built = record[folder]
 		const trusted = built?.hash === digest && built.programs.includes(buildName(folder))
 		if (!trusted) {
-			changed += 1
+			rebuilt[folder] = rebuildReason(lastBuilt[folder], current, built)
 			// Compiling from other content may replace what other builds use, whether or not this
 			// build succeeds.
 			if (built?.hash !== digest) delete record[folder]
@@ -1510,16 +1567,37 @@ export function prepareCheckoutCrates(
 	}
 	writeRecord(recordFile, record)
 	const recordBuilt = () => {
-		for (const [folder, hash] of hashes) {
-			const built = record[folder]?.hash === hash ? record[folder] : undefined
+		for (const [folder, current] of hashes) {
+			const built = record[folder]?.hash === current.hash ? record[folder] : undefined
 			record[folder] = {
-				hash,
+				hash: current.hash,
 				programs: [...new Set([...(built?.programs ?? []), buildName(folder)])],
 			}
+			lastBuilt[folder] = current
 		}
 		writeRecord(recordFile, record)
+		writeRecord(lastBuiltFile, lastBuilt)
 	}
-	return { changed, recordBuilt }
+	return { rebuilt, recordBuilt }
+}
+
+function rebuildReason(
+	last: LastBuilt | undefined,
+	current: LastBuilt,
+	built: BuiltCrate | undefined,
+): Rebuilt {
+	if (last && last.hash !== current.hash) {
+		const files = [...new Set([...Object.keys(last.files), ...Object.keys(current.files)])]
+			.filter((file) => last.files[file] !== current.files[file])
+			.sort()
+		return {
+			reason: 'edited',
+			files: files.slice(0, LOGGED_FILES),
+			...(files.length > LOGGED_FILES ? { moreFiles: files.length - LOGGED_FILES } : {}),
+		}
+	}
+	if (!built) return { reason: 'unrecorded' }
+	return { reason: built.hash === current.hash ? 'other-build' : 'other-checkout' }
 }
 
 /** Written whole, then renamed into place, so a stopped runner never leaves half a record. */
@@ -1889,6 +1967,8 @@ function isNoisyProgressLine(line: string): boolean {
 	return (
 		/^\s*Finished\s+/.test(line) ||
 		/^\s*(?:Building|Checking|Fetch)\s+\[[= >-]+\]/.test(line) ||
+		// The timing log keeps what the report said, then removes it.
+		/^\s*Timing report saved to /.test(line) ||
 		/^Browserslist: browsers data \(caniuse-lite\) is .+ old\./.test(line) ||
 		/^\s*npx update-browserslist-db@latest$/.test(line) ||
 		/^\s*Why you should do it regularly: https:\/\/github\.com\/browserslist\/update-db#readme$/.test(
