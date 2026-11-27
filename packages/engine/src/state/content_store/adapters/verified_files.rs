@@ -175,7 +175,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("mod.jar");
         fs::write(&path, b"content").unwrap();
+        // A write time of zero, so only a real change time can be above it.
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH)
+            .unwrap();
         let stamp = FileStamp::read(&File::open(&path).unwrap()).unwrap();
+        assert_eq!(stamp.modified, SystemTime::UNIX_EPOCH);
         assert!(stamp.changed.0 > 0);
     }
 
