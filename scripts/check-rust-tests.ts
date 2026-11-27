@@ -7,19 +7,32 @@
 //   node scripts/check-rust-tests.ts <file.rs>... only these
 //
 // Test code is a `tests/` folder, a module declared `#[cfg(test)] mod name;`, and any item marked
-// `#[cfg(test)]` or `#[test]`/`#[tokio::test]`. A test on tokio's paused clock
-// (`start_paused = true`) may sleep: that only moves its clock forward.
+// `#[cfg(test)]`, `#[cfg(all(test, ...))]` or `#[test]`/`#[tokio::test]`. A test on tokio's paused
+// clock (`start_paused = true`) may sleep and time itself with tokio's timers, which that clock
+// drives, but not with `std`'s.
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
 
 const QUARANTINE = /^\s*\/\/ quarantine: #\d+ \S/
+// `cfg(test)`, or `cfg(all(..., test, ...))`: compiled only into tests.
+const TEST_CFG =
+	/cfg\s*\(\s*(?:test|all\s*\((?:[^()]|\([^()]*\))*?(?<!not\s*\(\s*)\btest\b[^\]]*\))\s*\)/
 const WAITS = [
-	{ pattern: /\b(?<!fn )sleep(?:_until)?\s*\(/g, message: 'sleeps; await the event instead' },
 	{
-		pattern: /\bInstant::now\s*\(\s*\)\s*[-+]|\.elapsed\s*\(\s*\)|\bduration_since\s*\(/g,
+		pattern: /(?:\b[\w:]*::)?\b(?<!fn )sleep(?:_until)?\s*\(/g,
+		message: 'sleeps; await the event instead',
+		// A sleep is tokio's unless the thread's.
+		tokio: (match: string) => !/\bthread::/.test(match),
+	},
+	{
+		pattern:
+			/(?:\b[\w:]*::)?\bInstant::now\s*\(\s*\)\s*[-+]|\.elapsed\s*\(\s*\)|\b(?:checked_|saturating_)?duration_since\s*\(/g,
 		message: 'measures elapsed time; assert on events and counts',
+		tokio: (match: string, usesTokioInstant: boolean) =>
+			/\btokio::time::Instant::now/.test(match) ||
+			(usesTokioInstant && !/\bstd::time::/.test(match)),
 	},
 ]
 
@@ -27,7 +40,7 @@ const WAITS = [
  * The source with every comment, string and character literal blanked to spaces, keeping its
  * length and line breaks, so code can be searched and braces matched.
  */
-export function codeOnly(source: string): string {
+function codeOnly(source: string): string {
 	const out = source.split('')
 	const blank = (from: number, to: number) => {
 		for (let i = from; i < to; i++) if (out[i] !== '\n') out[i] = ' '
@@ -82,11 +95,19 @@ export function codeOnly(source: string): string {
 type Range = { readonly from: number; readonly to: number; readonly paused: boolean }
 
 /** The items of `code` marked as test code, braces included, nested ones too. */
-export function testRanges(code: string): ReadonlyArray<Range> {
+function testRanges(code: string): ReadonlyArray<Range> {
 	const ranges: Range[] = []
-	for (const match of code.matchAll(/#\[\s*(?:cfg\s*\(\s*test\s*\)|(?:\w+::)*test\b[^\]]*)\]/g)) {
+	for (const match of code.matchAll(/#\[\s*(?:cfg\s*\((?:[^\]])*\)|(?:\w+::)*test\b[^\]]*)\]/g)) {
+		if (match[0].includes('cfg') && !TEST_CFG.test(match[0])) continue
+		// The item's body: its first `{` outside brackets, before a `;` that would end it bodiless.
 		let open = match.index + match[0].length
-		while (open < code.length && code[open] !== '{' && code[open] !== ';') open++
+		let nested = 0
+		for (; open < code.length; open++) {
+			const char = code[open]!
+			if (char === '(' || char === '[') nested++
+			else if (char === ')' || char === ']') nested--
+			else if (nested === 0 && (char === '{' || char === ';')) break
+		}
 		if (code[open] !== '{') continue
 		let depth = 0
 		let close = open
@@ -101,18 +122,19 @@ export function testRanges(code: string): ReadonlyArray<Range> {
 }
 
 /** What breaks the rules in one file, as `line: message`. `wholeFile` marks a test-only file. */
-export function problems(source: string, wholeFile: boolean): ReadonlyArray<string> {
+function problems(source: string, wholeFile: boolean): ReadonlyArray<string> {
 	const code = codeOnly(source)
 	const ranges = testRanges(code)
+	const usesTokioInstant = /\buse\s+tokio::time::(?:\{[^}]*\bInstant\b|Instant\b)/.test(code)
 	const within = (index: number, paused: boolean) =>
 		ranges.some((range) => index >= range.from && index < range.to && range.paused === paused)
 	const lineOf = (index: number) => code.slice(0, index).split('\n').length
 	const found: Array<readonly [number, string]> = []
-	for (const { pattern, message } of WAITS) {
+	for (const { pattern, message, tokio } of WAITS) {
 		for (const match of code.matchAll(pattern)) {
-			if ((wholeFile || within(match.index, false)) && !within(match.index, true)) {
-				found.push([lineOf(match.index), `\`${match[0].replace(/\s*\(.*$/s, '')}\` ${message}`])
-			}
+			if (!wholeFile && !within(match.index, false) && !within(match.index, true)) continue
+			if (within(match.index, true) && tokio(match[0], usesTokioInstant)) continue
+			found.push([lineOf(match.index), `\`${match[0].replace(/\s*\(.*$/s, '')}\` ${message}`])
 		}
 	}
 	const lines = source.split('\n')
@@ -129,12 +151,13 @@ export function problems(source: string, wholeFile: boolean): ReadonlyArray<stri
 /** Files that are test code throughout: integration tests and `#[cfg(test)] mod name;` modules. */
 function testFiles(files: ReadonlyArray<string>): ReadonlySet<string> {
 	const tests = new Set(files.filter((file) => /(?:^|\/)tests\//.test(file)))
-	const declared = /#\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*(?:pub\S*\s+)?mod\s+(\w+)\s*;/g
+	const declared = /#\[\s*(cfg\s*\((?:[^\]])*\))\s*\]\s*(?:pub\S*\s+)?mod\s+(\w+)\s*;/g
 	for (const file of files) {
 		const folder = /(?:^|\/)(?:lib|main|mod)\.rs$/.test(file)
 			? NodePath.posix.dirname(file)
 			: file.slice(0, -'.rs'.length)
-		for (const [, name] of codeOnly(NodeFS.readFileSync(file, 'utf8')).matchAll(declared)) {
+		for (const [, cfg, name] of codeOnly(NodeFS.readFileSync(file, 'utf8')).matchAll(declared)) {
+			if (!TEST_CFG.test(cfg!)) continue
 			tests.add(`${folder}/${name}.rs`)
 			tests.add(`${folder}/${name}/mod.rs`)
 		}
@@ -142,24 +165,23 @@ function testFiles(files: ReadonlyArray<string>): ReadonlySet<string> {
 	return tests
 }
 
-if (import.meta.main) {
-	const tracked = NodeChildProcess.execFileSync('git', ['ls-files', '-z', '--', '*.rs'], {
-		encoding: 'utf8',
-		maxBuffer: 64 * 1024 * 1024,
-	})
-		.split('\0')
-		.filter((file) => file && NodeFS.existsSync(file))
-	const named = process.argv.slice(2).map((file) => file.replaceAll('\\', '/'))
-	const tests = testFiles(tracked)
-	let failed = false
-	for (const file of named.length > 0 ? named : tracked) {
-		for (const problem of problems(NodeFS.readFileSync(file, 'utf8'), tests.has(file))) {
-			console.error(`${file}:${problem}`)
-			failed = true
-		}
+const tracked = NodeChildProcess.execFileSync('git', ['ls-files', '-z', '--', '*.rs'], {
+	encoding: 'utf8',
+	maxBuffer: 64 * 1024 * 1024,
+})
+	.split('\0')
+	.filter((file) => file && NodeFS.existsSync(file))
+const named = process.argv.slice(2).map((file) => file.replaceAll('\\', '/'))
+// Named files may be new and untracked; they can be tests, or declare test modules, too.
+const tests = testFiles([...new Set([...tracked, ...named])])
+let failed = false
+for (const file of named.length > 0 ? named : tracked) {
+	for (const problem of problems(NodeFS.readFileSync(file, 'utf8'), tests.has(file))) {
+		console.error(`${file}:${problem}`)
+		failed = true
 	}
-	if (failed) {
-		console.error('\nSee docs/internals/testing.md, Waiting for work.')
-		process.exitCode = 1
-	}
+}
+if (failed) {
+	console.error('\nSee docs/internals/testing.md, Waiting for work.')
+	process.exitCode = 1
 }
