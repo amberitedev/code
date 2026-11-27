@@ -3,7 +3,7 @@ import { queryOptions } from '@tanstack/vue-query'
 
 type NewsFeedArticle = Omit<NewsArticle, 'path'> & { link: string }
 
-export const newsKeys = {
+const newsKeys = {
 	articles: ['news', 'articles'] as const,
 }
 

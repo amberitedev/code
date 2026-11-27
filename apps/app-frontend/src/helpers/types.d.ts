@@ -10,11 +10,7 @@ export type { ModLoader as InstanceLoader } from '@amberite/contracts/protocol'
 export type {
 	CacheBehaviour,
 	ContentFile,
-	ContentSourceKind,
-	Hooks,
-	MemorySettings,
 	SharedInstanceAttachment,
-	WindowSize,
 } from '@amberite/contracts/engine'
 
 /** The engine's instance with the options it shares and its groups, which the App keeps. */
@@ -33,9 +29,7 @@ type InstanceLinkIdentity = {
 	content_version_id?: ModrinthId | null
 }
 
-export type InstanceLink = InstanceLinkIdentity & InstanceLinkResponse
-
-export type Instance = GameInstance
+type InstanceLink = InstanceLinkIdentity & InstanceLinkResponse
 
 export type ContentFileProjectType = 'mod' | 'datapack' | 'resourcepack' | 'shaderpack'
 

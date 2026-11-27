@@ -1,8 +1,6 @@
 import { AbstractModule } from '../../core/abstract-module'
 import type { Paper } from './types'
 
-export type { Paper } from './types'
-
 const PAPER_BASE_URL = 'https://fill.papermc.io'
 
 export class PaperVersionsV3Module extends AbstractModule {

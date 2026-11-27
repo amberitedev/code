@@ -3,7 +3,7 @@ import type { PreferencesUpdate, UserPreferences } from '@amberite/contracts/bac
 import { invalid, objectBody } from '../common/http'
 import type { Env, UserRow } from '../common/types'
 
-export const defaultPreferences: UserPreferences = {
+const defaultPreferences: UserPreferences = {
 	appearance: { auto: false, theme: 'dark' },
 	behavior: {
 		minimize_app: false,

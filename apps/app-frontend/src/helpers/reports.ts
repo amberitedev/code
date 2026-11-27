@@ -1,6 +1,6 @@
 import { apiClient } from '@/platform/modrinth-client'
 
-export type ReportItemType = 'project' | 'version' | 'user' | 'shared-instance'
+type ReportItemType = 'project' | 'version' | 'user' | 'shared-instance'
 
 export interface CreateReportRequest {
 	report_type: string

@@ -40,14 +40,6 @@ export async function import_instance(launcherType, basePath, instanceFolder) {
 	return await install_import_instance(launcherType, basePath, instanceFolder)
 }
 
-/// Checks if this instance is valid for importing, given a certain launcher type
-/// eg: is_valid_importable_instance("C:/MultiMC/Instance 1", "MultiMC")
-export async function is_valid_importable_instance(instanceFolder, launcherType) {
-	return await apiClient.local.call(launcherImport.checkImportableInstance, {
-		query: { instance_folder: instanceFolder, launcher_type: launcherType },
-	})
-}
-
 /// Gets the default path for the given launcher type
 /// null if it can't be found or doesn't exist
 /// eg: get_default_launcher_path("MultiMC")

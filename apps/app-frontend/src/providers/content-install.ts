@@ -52,7 +52,7 @@ interface ModpackAlreadyInstalledModalRef {
 	show: (instanceName: string, instanceId: string) => void
 }
 
-export type ContentInstallCallback = (versionId?: string, installedProjectIds?: string[]) => void
+type ContentInstallCallback = (versionId?: string, installedProjectIds?: string[]) => void
 type InstallingProjectDisplay = {
 	id?: string
 	slug?: string | null

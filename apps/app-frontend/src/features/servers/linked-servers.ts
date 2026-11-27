@@ -163,7 +163,7 @@ export function useLinkedServers(instanceId: MaybeRefOrGetter<string | undefined
 }
 
 /** Whether the server's process is up, including while it starts or stops. */
-export function isServerUp(server: Server) {
+function isServerUp(server: Server) {
 	return (
 		server.power_state === 'running' ||
 		server.power_state === 'starting' ||

@@ -4,16 +4,16 @@ import { arrayBufferToBase64 } from '@modrinth/utils/utils'
 import { readFile } from '@/platform/files'
 import { apiClient } from '@/platform/modrinth-client'
 
-export type { Cape, Skin, SkinModel, SkinSource } from '@amberite/contracts/app'
+export type { Cape, Skin, SkinModel } from '@amberite/contracts/app'
 
 export interface SkinTextureUrl {
 	original: string
 	normalized: string
 }
 
-export const DEFAULT_MODEL_SORTING = ['Steve', 'Alex'] as string[]
+const DEFAULT_MODEL_SORTING = ['Steve', 'Alex'] as string[]
 
-export const DEFAULT_MODELS: Record<string, SkinModel> = {
+const DEFAULT_MODELS: Record<string, SkinModel> = {
 	Steve: 'CLASSIC',
 	Alex: 'SLIM',
 	Zuri: 'CLASSIC',
@@ -73,7 +73,7 @@ export async function determineModelType(texture: string): Promise<'SLIM' | 'CLA
 	})
 }
 
-export async function fixUnknownSkins(list: Skin[]) {
+async function fixUnknownSkins(list: Skin[]) {
 	const unknownSkins = list.filter((s) => s.variant === 'UNKNOWN')
 	for (const unknownSkin of unknownSkins) {
 		unknownSkin.variant = await determineModelType(unknownSkin.texture)
@@ -100,16 +100,6 @@ export async function get_available_capes(): Promise<Cape[]> {
 
 export async function get_available_skins(): Promise<Skin[]> {
 	return apiClient.local.call(skins.listSkins)
-}
-
-export async function add_and_equip_custom_skin(
-	textureBlob: Uint8Array,
-	variant: SkinModel,
-	cape?: Cape,
-): Promise<Skin> {
-	return await apiClient.local.call(skins.addAndEquipCustomSkin, {
-		body: { texture_blob: Array.from(textureBlob), variant, cape },
-	})
 }
 
 export async function equip_skin(skin: Skin): Promise<void> {
@@ -153,10 +143,6 @@ export async function normalize_skin_texture(texture: Uint8Array | string): Prom
 		body: typeof texture === 'string' ? texture : Array.from(texture),
 	})
 	return new Uint8Array(await png.arrayBuffer())
-}
-
-export async function unequip_skin(): Promise<void> {
-	await apiClient.local.call(skins.unequipSkin)
 }
 
 export async function flush_pending_skin_change(): Promise<void> {

@@ -34,11 +34,6 @@ export async function set_group_order(groupIds: string[]): Promise<void> {
 	return await apiClient.local.call(instanceGroups.setInstanceGroupOrder, { body: groupIds })
 }
 
-/** Each instance's group ids, by instance id. */
-export async function list_group_memberships(): Promise<Record<string, string[]>> {
-	return await apiClient.local.call(instanceGroups.listInstanceGroupMemberships)
-}
-
 export async function set_group_memberships(
 	updates: InstanceGroupMembershipUpdate[],
 ): Promise<void> {

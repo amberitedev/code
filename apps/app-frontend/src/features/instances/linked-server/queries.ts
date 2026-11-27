@@ -3,7 +3,7 @@ import { queryOptions } from '@tanstack/vue-query'
 
 import { get_instance_worlds } from '@/helpers/worlds'
 
-export const linkedServerKeys = {
+const linkedServerKeys = {
 	linkedServer: (instanceId: string, sharedInstanceId: string, userId: string | null | undefined) =>
 		['instances', instanceId, 'hosting', sharedInstanceId, userId] as const,
 	worlds: (instanceId: string) => ['instances', instanceId, 'hosting-worlds'] as const,

@@ -73,7 +73,7 @@ const libraryLoaderPriority: Record<string, number> = {
 
 export type LibrarySort = (typeof librarySortOptions)[number]
 export type LibraryGroupBy = (typeof libraryGroupOptions)[number]['value']
-export type LibraryFilters = Record<
+type LibraryFilters = Record<
 	'instanceType' | 'gameVersion' | 'loader' | 'installState' | 'sharing' | 'owner',
 	string[]
 >
@@ -1327,7 +1327,7 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 	}
 }
 
-export type LibraryState = ReturnType<typeof createLibraryState>
+type LibraryState = ReturnType<typeof createLibraryState>
 
 const libraryKey: InjectionKey<LibraryState> = Symbol('library')
 

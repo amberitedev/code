@@ -5,8 +5,6 @@
 	"main": "./index.ts",
 	"types": "./index.ts",
 	"scripts": {
-		"lint": "pnpm run icons:validate && eslint . && prettier --check .",
-		"fix": "pnpm run icons:generate && eslint . --fix && prettier --write .",
 		"icons:add": "jiti build/add-icons.ts",
 		"icons:test": "jiti build/generate-exports.ts --test",
 		"icons:validate": "jiti build/generate-exports.ts --validate",

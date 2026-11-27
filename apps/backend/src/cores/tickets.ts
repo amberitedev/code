@@ -19,7 +19,7 @@ import type { Env } from '../common/types'
 
 const SESSION_TTL_S = 5 * 60
 const STORE_TTL_S = 60 * 60
-export const FETCH_TTL_S = 6 * 60 * 60
+const FETCH_TTL_S = 6 * 60 * 60
 const PULL_TTL_S = 24 * 60 * 60
 
 interface SigningKey {

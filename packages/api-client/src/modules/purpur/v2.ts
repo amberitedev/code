@@ -1,8 +1,6 @@
 import { AbstractModule } from '../../core/abstract-module'
 import type { Purpur } from './types'
 
-export type { Purpur } from './types'
-
 const PURPUR_BASE_URL = 'https://api.purpurmc.org'
 
 export class PurpurVersionsV2Module extends AbstractModule {

@@ -30,13 +30,10 @@
 	"scripts": {
 		"clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
 		"build": "pnpm run clean && node esbuild.config.mjs",
-		"lint": "eslint . && prettier --check .",
-		"fix": "eslint . --fix && prettier --write .",
 		"typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/typecheck.tsbuildinfo"
 	},
 	"dependencies": {
 		"@amberite/contracts": "workspace:*",
-		"mitt": "^3.0.1",
 		"ofetch": "^1.4.1"
 	},
 	"devDependencies": {

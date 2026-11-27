@@ -33,10 +33,6 @@ export function stringField(body: Record<string, unknown>, key: string, max = 10
 	return value
 }
 
-export async function readJson(request: Request): Promise<Record<string, unknown>> {
-	return objectBody(await readJsonBody(request, 65536))
-}
-
 export async function readJsonBody(request: Request, limit: number): Promise<unknown> {
 	const text = new TextDecoder().decode(await readBytes(request, limit))
 	try {

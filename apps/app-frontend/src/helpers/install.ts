@@ -1,25 +1,18 @@
 import {
 	type ImportLauncherType,
-	type InstallErrorView,
-	type InstallJavaStep,
 	type InstallJobSnapshot,
 	type InstallJobStatus,
 	type InstallPhaseId,
 	type InstallProgress,
-	type InstallProgressSecondary,
 	installs,
-	type SharedHistorySettings,
-	type SharedInstanceExternalFilePreview,
 	type SharedInstanceHistoryEntry,
 	type SharedInstanceInstallPreview,
-	type SharedInstanceInviteInstallPreview,
 	type SharedInstanceUpdateDiff,
 	type SharedInstanceUpdatePreview,
 } from '@amberite/contracts/engine'
 import {
 	type CreatePackLocation,
 	type InstallCreateInstanceRequest,
-	type InstallModpackPreview,
 	type InstallPostInstallEdit,
 	launcherImport,
 	localInstalls,
@@ -32,38 +25,28 @@ import type { AppEvents } from '@/providers/app-events'
 export type {
 	CreatePackLocation,
 	InstallCreateInstanceRequest,
-	InstallErrorView,
-	InstallJavaStep,
 	InstallJobSnapshot,
 	InstallJobStatus,
-	InstallModpackPreview,
 	InstallPhaseId,
 	InstallPostInstallEdit,
 	InstallProgress,
-	InstallProgressSecondary,
-	SharedHistorySettings,
-	SharedInstanceExternalFilePreview,
 	SharedInstanceHistoryEntry,
 	SharedInstanceInstallPreview,
-	SharedInstanceInviteInstallPreview,
 	SharedInstanceUpdateDiff,
 	SharedInstanceUpdatePreview,
 }
 
 export type SharedInstanceUnavailableReason = 'deleted' | 'access_revoked' | 'quarantined'
 
-export type PackLocationVersionId = Extract<CreatePackLocation, { type: 'fromVersionId' }>
-export type PackLocationFile = Extract<CreatePackLocation, { type: 'fromFile' }>
-
 const SHARED_INSTANCE_UNAVAILABLE_ERROR_CODES: Record<string, SharedInstanceUnavailableReason> = {
 	shared_instance_deleted: 'deleted',
 	shared_instance_access_revoked: 'access_revoked',
 	shared_instance_quarantined: 'quarantined',
 }
-export const SHARED_INSTANCES_API_ERROR_CODE = 'shared_instances_api_error'
-export const SHARED_INSTANCE_FILE_NOT_ALLOWED_ERROR_CODE = 'shared_instance_file_not_allowed'
-export const SHARED_INSTANCE_OWNER_BEHIND_ERROR_CODE = 'shared_instance_owner_behind'
-export const SHARED_INSTANCE_LIMIT_REACHED_ERROR_CODE = 'shared_instance_limit_reached'
+const SHARED_INSTANCES_API_ERROR_CODE = 'shared_instances_api_error'
+const SHARED_INSTANCE_FILE_NOT_ALLOWED_ERROR_CODE = 'shared_instance_file_not_allowed'
+const SHARED_INSTANCE_OWNER_BEHIND_ERROR_CODE = 'shared_instance_owner_behind'
+const SHARED_INSTANCE_LIMIT_REACHED_ERROR_CODE = 'shared_instance_limit_reached'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null
@@ -234,23 +217,13 @@ export async function install_pack_to_existing_instance(
 	})
 }
 
-export async function install_bulk_update_content(
-	instanceId: string,
-	updates: { project_path: string; version_id: string }[],
-) {
-	return await apiClient.local.call(installs.UpdateInstanceContent, {
-		params: { id: instanceId },
-		body: updates,
-	})
-}
-
 export async function install_job_list(includeFinished: boolean) {
 	return await apiClient.local.call(installs.ListInstallJobs, {
 		query: { include_finished: includeFinished },
 	})
 }
 
-export async function install_job_get(jobId: string) {
+async function install_job_get(jobId: string) {
 	return await apiClient.local.call(installs.GetInstallJob, { params: { id: jobId } })
 }
 

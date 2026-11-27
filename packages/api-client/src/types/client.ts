@@ -6,8 +6,8 @@ import type { AbstractFeature } from '../core/abstract-feature'
 import type { RequestContext } from './request'
 import type { LocalFileUploader } from './upload'
 
-export type MaybePromise<T> = T | Promise<T>
-export type UserAgentProvider = string | (() => MaybePromise<string | undefined>)
+type MaybePromise<T> = T | Promise<T>
+type UserAgentProvider = string | (() => MaybePromise<string | undefined>)
 export type BaseUrlConfig = string | (() => string)
 
 /**

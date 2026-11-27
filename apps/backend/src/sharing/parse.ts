@@ -23,7 +23,7 @@ import { externalFile } from './pool'
 // The sharing routes' bodies, checked into their contract types. A body that does not fit throws
 // `invalid_input`.
 
-export function string(value: unknown, field: string, max = 256): string {
+function string(value: unknown, field: string, max = 256): string {
 	if (typeof value !== 'string' || value.length > max || !value.trim())
 		throw new ApiError(400, 'invalid_input', `Invalid ${field}`)
 	return value

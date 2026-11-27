@@ -10,7 +10,7 @@ import { ApiCallError } from '@modrinth/api-client'
 import { apiClient } from '@/platform/modrinth-client'
 import type { AppEventPayload, AppEvents } from '@/providers/app-events'
 
-export interface LoadingBarType {
+interface LoadingBarType {
 	type?: string
 	version?: string | number
 	instance_id?: string

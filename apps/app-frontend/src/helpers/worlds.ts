@@ -25,9 +25,7 @@ export type {
 	DisplayStatus,
 	ProtocolVersion,
 	ServerPackStatus,
-	ServerSource,
 	ServerStatus,
-	SingleplayerGameMode,
 	WorldType,
 }
 
@@ -108,10 +106,7 @@ export async function get_instance_worlds(instanceId: string): Promise<World[]> 
 	return worlds.map(withIconUrl)
 }
 
-export async function get_singleplayer_world(
-	instance: string,
-	world: string,
-): Promise<SingleplayerWorld> {
+async function get_singleplayer_world(instance: string, world: string): Promise<SingleplayerWorld> {
 	const found = await apiClient.local.call(worldRoutes.GetSingleplayerWorld, {
 		params: { id: instance, world },
 	})
@@ -144,10 +139,6 @@ export async function rename_world(
 
 export async function reset_world_icon(instance: string, world: string): Promise<void> {
 	return await apiClient.local.call(worldRoutes.ResetWorldIcon, { params: { id: instance, world } })
-}
-
-export async function backup_world(instance: string, world: string): Promise<number> {
-	return await apiClient.local.call(worldRoutes.BackupWorld, { params: { id: instance, world } })
 }
 
 export async function delete_world(instance: string, world: string): Promise<void> {
@@ -253,17 +244,13 @@ export function sortWorlds(worlds: World[]) {
 	})
 }
 
-export function isSingleplayerWorld(world: World): world is SingleplayerWorld {
-	return world.type === 'singleplayer'
-}
-
-export function isServerWorld(world: World): world is ServerWorld {
+function isServerWorld(world: World): world is ServerWorld {
 	return world.type === 'server'
 }
 
 const MINECRAFT_FORMATTING_CODE = /\u00A7[0-9A-FK-ORX]/gi
 
-export function stripMinecraftFormatting(text: string): string {
+function stripMinecraftFormatting(text: string): string {
 	return text.replace(MINECRAFT_FORMATTING_CODE, '').replace(/\u00A7/g, '')
 }
 
@@ -398,25 +385,6 @@ export async function ensureManagedServerWorldExists(
 	} catch (err) {
 		console.error('Failed to ensure managed server world exists:', err)
 	}
-}
-
-export async function getServerLatency(
-	address: string,
-	protocolVersion: ProtocolVersion | null = null,
-): Promise<number | undefined> {
-	const pings: number[] = []
-	for (let i = 0; i < 3; i++) {
-		try {
-			const status = await get_server_status(address, protocolVersion)
-			if (status.ping != null) {
-				pings.push(status.ping)
-			}
-		} catch {
-			// Ignore individual ping failures
-		}
-	}
-	if (pings.length === 0) return undefined
-	return Math.round(pings.reduce((sum, p) => sum + p, 0) / pings.length)
 }
 
 export async function refreshServerData(
