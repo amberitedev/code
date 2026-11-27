@@ -27,6 +27,8 @@ const engine: Crate = {
 const app: Crate = { name: 'amberite-app', dir: 'apps/app', entry: 'src/main.rs', features: [] }
 const databases = NodePath.join(root, 'target', 'sqlx')
 NodeFS.mkdirSync(databases, { recursive: true })
+// The App's build only checks that the frontend's build folder exists.
+NodeFS.mkdirSync(NodePath.join(root, 'apps', 'app-frontend', 'dist'), { recursive: true })
 
 /** `cargo check` of one crate. `database` is where its queries are checked, none for offline. */
 function check(crate: Crate, database?: string): boolean {
