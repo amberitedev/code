@@ -102,6 +102,20 @@ committed, so the same Rust in two checkouts gives the same key. When the key al
 the runner starts it without Cargo. That is the usual case in a worktree that does not touch Rust.
 The six most recently used keys are kept.
 
+When the key has no program here, the runner looks for one CI built before it compiles. The
+[Dev programs](../../.github/workflows/dev-programs.yml) workflow builds every Rust change on `main`
+for Windows and keeps both programs for 90 days in an artifact named after the key, which `gh`
+downloads. So a checkout whose Rust is `main`'s compiles nothing, even on a machine that never built
+it. A downloaded program's backtraces name functions but not lines, which keeps the download small.
+Two traps:
+
+- The key only matches when `packages/engine/.env` is the copy of `.env.prod` that setup makes, and
+  no `.env.local` or environment variable overrides what it sets. Other settings give another key,
+  and that checkout compiles its own.
+- Only an artifact that workflow made in this repository, on a push or a manual run, for a commit
+  that is on `main`, is taken. A pull request can upload one under any name, and the runner runs what it
+  downloads.
+
 Nothing in the build depends on ports. The App is told where its frontend is, and whether to keep
 its window hidden, in `--amberite-dev-config` when it starts.
 
@@ -249,8 +263,7 @@ lists the other commands.
 Setup, every Rust build and test run, every `dev` start on the checkout's data, and every applied
 fixture (the one a `dev` with a fixture applies too) append one JSON line to the primary checkout's
 `.data/timings.jsonl`, shared by all checkouts. Each line has `kind` (`setup`, `build`, `test`, `dev`,
-`fixture`), the worktree, the result, and milliseconds per step: `install` for setup, `total` for a
-build, `compile` and `test` plus the tested crates for a test run, and the wait until ready for `dev`
+`fixture`), the worktree, the result, and milliseconds per step: `install` for setup, `lookup` (asking for a download) and `total` for a build, or `download` alone when CI's programs were fetched, `compile` and `test` plus the tested crates for a test run, and the wait until ready for `dev`
 and `fixture`. It records what happened, under whatever else the machine was doing. Build and test
 lines also carry Cargo's `--timings` seconds per repo crate, and third-party crates as one total.
 
