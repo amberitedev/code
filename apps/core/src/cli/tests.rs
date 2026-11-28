@@ -316,6 +316,14 @@ async fn pairing_shows_the_code_then_who_it_is_paired_with() {
     assert!(error.to_string().contains("--yes"), "{error}");
     let unpaired = super::pairing::unpair(&ui, &client, true).await.unwrap();
     assert_eq!(unpaired.json["paired"], false);
+    // In Core itself too, not only in what the command printed.
+    let owned: bool = sqlx::query_scalar(
+        "SELECT owner_user_id IS NOT NULL FROM core WHERE id = 1",
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap();
+    assert!(!owned);
 }
 
 #[tokio::test]
@@ -342,6 +350,9 @@ async fn servers_are_listed_started_and_stopped_by_name() {
             .err()
             .unwrap();
     assert!(error.to_string().contains("--accept-eula"), "{error}");
+    // Refusing the start left it stopped.
+    let list = super::servers::list(&ui, &client).await.unwrap();
+    assert_eq!(list.json[0]["power_state"], "stopped");
     let stopped = super::servers::stop(
         &ui,
         &client,

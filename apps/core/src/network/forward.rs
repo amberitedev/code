@@ -282,6 +282,7 @@ impl Network {
             facts: Facts {
                 what: "Core's store".into(),
                 port: self.api_port,
+                transport: Transport::Tcp,
                 local_ip,
                 // Core's port listens while Core answers this.
                 listening: true,
@@ -441,6 +442,7 @@ impl Network {
         let facts = Facts {
             what,
             port,
+            transport: Transport::Tcp,
             local_ip,
             listening: listening(port).await,
             firewall: self.firewall(),

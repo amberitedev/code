@@ -23,7 +23,10 @@ pub async fn list(ui: &Ui, client: &Client) -> Result<Done> {
     ui.intro("copal list");
     let servers = all(client).await?;
     if servers.is_empty() {
-        ui.outro(NO_SERVERS);
+        // Piped, the output is one row per server: no servers, no rows.
+        if ui.terminal() {
+            ui.outro(NO_SERVERS);
+        }
         return Ok(Done::ok(&servers));
     }
     if ui.terminal() {
@@ -105,9 +108,10 @@ pub fn table(servers: &[Server], drawn: bool) -> String {
                 dot(server.power_state),
             )
         } else {
-            // Tabs, so a name or a loader with a space in it is still one column.
+            // Tabs, so a name or a loader with a space in it is still one column, and a name
+            // with a tab or a line break in it is still one row of six.
             [
-                name.as_str(),
+                name.replace(['\t', '\n'], " ").as_str(),
                 state,
                 runs.as_str(),
                 &port.to_string(),
@@ -171,6 +175,12 @@ pub async fn start(
             choose(ui, "Which server do you want to start?", stopped, "start")?
         }
     };
+    if server.power_state == ServerPower::Stopping {
+        bail!(
+            "{} is still stopping. Start it once it has stopped",
+            super::safe(&server.name)
+        );
+    }
     if is_up(server.power_state) {
         ui.outro(format!(
             "{} is already {}.",
@@ -319,6 +329,19 @@ pub async fn stop(
     }
     for server in confirmed {
         let name = super::safe(&server.name);
+        // Someone may have joined while the others were asked about: nobody is thrown out
+        // that nobody was asked about. It is left running, and said so below.
+        let asked = server
+            .players
+            .as_deref()
+            .is_some_and(|players| !players.is_empty());
+        if !yes && !asked {
+            let now =
+                call::<GetServer>(client, &id(server), &(), Empty).await?;
+            if now.players.is_some_and(|players| !players.is_empty()) {
+                continue;
+            }
+        }
         let spinner = ui.spinner(if kill {
             format!("{doing} {name} without saving")
         } else {

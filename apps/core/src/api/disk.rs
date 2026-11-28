@@ -57,29 +57,38 @@ fn usage(
             .into_iter()
             .map(|(id, name)| {
                 let backups = paths.backups().join(&id);
-                ServerUsage {
-                    files: size(&paths.server(&id)),
-                    backups: size(&backups),
+                Ok(ServerUsage {
+                    files: size(&paths.server(&id))?,
+                    backups: size(&backups)?,
                     backup_count: backup_count(&backups),
                     id,
                     name,
-                }
+                })
             })
-            .collect(),
-        shared: size(&paths.store()),
-        game_files: size(&paths.meta()),
+            .collect::<io::Result<_>>()?,
+        shared: size(&paths.store())?,
+        game_files: size(&paths.meta())?,
     })
 }
 
-/// The bytes of every file under `path`, without following links. Missing is empty.
-fn size(path: &Path) -> u64 {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter_map(|entry| entry.metadata().ok())
-        .filter(std::fs::Metadata::is_file)
-        .map(|metadata| metadata.len())
-        .sum()
+/// The bytes of every file under `path`, without following links. What is missing counts as
+/// nothing: a folder never made, or a file a running server removed while this looked. Anything
+/// else that cannot be read is an error, not a smaller number.
+fn size(path: &Path) -> io::Result<u64> {
+    let mut bytes = 0;
+    for entry in WalkDir::new(path) {
+        let metadata = match entry.and_then(|entry| entry.metadata()) {
+            Ok(metadata) => metadata,
+            Err(error) => match error.io_error().map(io::Error::kind) {
+                Some(io::ErrorKind::NotFound) => continue,
+                _ => return Err(error.into()),
+            },
+        };
+        if metadata.is_file() {
+            bytes += metadata.len();
+        }
+    }
+    Ok(bytes)
 }
 
 /// Finished backups: the zips in a server's backup folder (see `backups`).

@@ -53,7 +53,7 @@ pub async fn pair(ui: &Ui, client: &Client, no_wait: bool) -> Result<Done> {
                          2. Go to Settings > Cores > Add Core.\n\
                          3. Enter the code. It works for {} more minutes.\n\n\
                          {}",
-                        ui::bold(ui::cyan(code)),
+                        ui::bold(ui::paint(code, ui::Tone::Accent)),
                         minutes.max(1),
                         ui::dim(format!(
                             "Or, on the computer with Amberite, open amberite://approve/{code}"
@@ -72,7 +72,7 @@ pub async fn pair(ui: &Ui, client: &Client, no_wait: bool) -> Result<Done> {
         let spinner = ui.spinner("Waiting for you to approve it in Amberite");
         let shown = status.code.clone();
         let waited = tokio::select! {
-            waited = approved_or_replaced(client, shown) => waited,
+            waited = approved_or_replaced(client, shown, status.expires_at) => waited,
             _ = tokio::signal::ctrl_c() => {
                 spinner.clear();
                 ui.outro(
@@ -101,19 +101,35 @@ pub async fn pair(ui: &Ui, client: &Client, no_wait: bool) -> Result<Done> {
             });
             return Ok(Done::ok(&status));
         }
+        if status.code.is_none() {
+            spinner.failed(
+                "That code ran out, and Core could not get a new one from Amberite",
+            );
+            ui.outro("Try again with: copal pair");
+            return Ok(Done::failed(&status));
+        }
         spinner.done("That code ran out. Here is a new one.");
     }
 }
 
-/// Wait until this Core is paired, or shows another code than `shown`.
+/// Wait until this Core is paired, or shows another code than `shown`, or `shown` ran out
+/// with no code after it, which is a Core that cannot reach Amberite for another.
 async fn approved_or_replaced(
     client: &Client,
     shown: Option<String>,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<PairingStatus> {
+    // A new code takes Core a moment to get: only a longer gap is a code that will not come.
+    let gone = expires_at.map(|at| at + chrono::Duration::seconds(30));
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let status = call::<GetPairing>(client, &(), &(), Empty).await?;
         if status.paired || (status.code.is_some() && status.code != shown) {
+            return Ok(status);
+        }
+        if status.code.is_none()
+            && gone.is_some_and(|gone| chrono::Utc::now() > gone)
+        {
             return Ok(status);
         }
     }
@@ -147,7 +163,14 @@ pub async fn unpair(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
     let spinner = ui.spinner("Leaving the account");
     if let Err(error) = call::<Unpair>(client, &(), &(), Empty).await {
         spinner.clear();
-        return Err(error.wrap_err("This Core is still paired"));
+        // Core said no, or said nothing: only the first is a Core that is still paired.
+        return Err(if error.is::<super::client::Refused>() {
+            error.wrap_err("This Core is still paired")
+        } else {
+            error.wrap_err(
+                "Unpairing could not be confirmed. See whether it worked with: copal status",
+            )
+        });
     }
     spinner.done("This Core is no longer paired");
     ui.outro("Pair it again with: copal pair");

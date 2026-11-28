@@ -417,7 +417,7 @@ fn checks(
         (Err(Silent::Root), service::State::Running) => own(
             "service",
             CheckState::Ok,
-            "the service is running".into(),
+            "the service is running. Core does not answer root".into(),
             vec![],
             None,
         ),

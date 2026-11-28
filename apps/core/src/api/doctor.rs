@@ -323,6 +323,7 @@ fn ports(checked: Option<&Checked>, router: CheckState) -> DoctorCheck {
             // The steps for the refused port, as the diagnosis gives them for Core's.
             let mut facts = checked.facts.clone();
             facts.port = mapped.port;
+            facts.transport = mapped.transport;
             if let RouterFacts::Found { mapping, .. } = &mut facts.router {
                 *mapping = Err(refusal.clone());
             }
@@ -473,6 +474,7 @@ mod tests {
             facts: Facts {
                 what: "Core's store".into(),
                 port: 16662,
+                transport: Transport::Tcp,
                 local_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)),
                 listening: true,
                 firewall: Firewall::Open,

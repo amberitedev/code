@@ -3,20 +3,27 @@
 use color_eyre::eyre::Result;
 use contracts::{
     Empty,
-    core::{DiskUsage, GetDiskUsage},
+    core::{DiskUsage, GetDiskUsage, ServerUsage},
 };
 use sharing_client::disk::label;
 
 use super::{
     Client, Done,
     call::call,
-    ui::{self, Mark, Ui},
+    ui::{self, Mark, Tone, Ui},
 };
 
-/// How many of the biggest items are named without `--all`.
+/// How many servers are named without `--all`.
 const BIGGEST: usize = 5;
-/// The width of every bar, in cells.
-const BAR: usize = 30;
+/// The width of a bar, in cells.
+const BAR: usize = 48;
+
+/// One part of a whole, with the colour it is drawn in.
+struct Part {
+    name: &'static str,
+    bytes: u64,
+    tone: Tone,
+}
 
 /// `copal storage`.
 pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
@@ -30,101 +37,195 @@ pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
         }
     };
     spinner.clear();
-    let parts = parts(&usage);
-    let core: u64 = parts.iter().map(|(_, bytes)| bytes).sum();
+    let kinds = kinds(&usage);
+    let core: u64 = kinds.iter().map(|kind| kind.bytes).sum();
     let used = usage.total.saturating_sub(usage.free);
-    let disk = format!(
-        "Disk: {} used of {}, {} free",
-        size(used),
-        size(usage.total),
-        size(usage.free)
-    );
+    let disk = [
+        Part {
+            name: "Core",
+            bytes: core.min(used),
+            tone: Tone::Accent,
+        },
+        Part {
+            name: "Everything else",
+            bytes: used.saturating_sub(core),
+            tone: Tone::Grey,
+        },
+        Part {
+            name: "Free",
+            bytes: usage.free,
+            tone: Tone::Faint,
+        },
+    ];
     // Through its parts, so the separators are this OS's own.
     let folder: std::path::PathBuf =
         crate::daemon::config::data_dir().components().collect();
     let folder = folder.display().to_string();
-    let biggest = biggest(&usage);
-    let shown = if all {
-        biggest.len()
-    } else {
-        BIGGEST.min(biggest.len())
-    };
-    let more = biggest.len() - shown;
+    let servers = biggest(&usage, all);
+    let more = usage.servers.len() - servers.len();
 
     if ui.terminal() {
         ui.say(
             Mark::Done,
-            format!("{disk}\n{}", disk_bar(core, used, usage.total)),
+            format!(
+                "Disk {}\n{}",
+                ui::dim(size(usage.total)),
+                breakdown(&disk, usage.total)
+            ),
         );
-        let widest = parts.iter().map(|(_, bytes)| *bytes).max().unwrap_or(0);
-        let rows: Vec<String> = parts
-            .iter()
-            .map(|(name, bytes)| {
-                format!(
-                    "{name:<19} {:>11}  {}",
-                    size(*bytes),
-                    ui::cyan(full().repeat(cells(*bytes, widest, BAR)))
-                )
-            })
-            .collect();
         ui.say(
             Mark::Done,
             format!(
-                "Core uses {}\n{}\n{}",
-                size(core),
-                rows.join("\n"),
+                "Core {}\n{}\n{} {folder}",
+                ui::dim(size(core)),
+                breakdown(&kinds, core),
                 // The path is left plain, so a long one can be folded.
-                format_args!("{} {folder}", ui::dim("Data folder:"))
+                ui::dim("in"),
             ),
         );
-        if !biggest.is_empty() {
-            let width = biggest[..shown]
-                .iter()
-                .map(|item| item.name.chars().count())
-                .max()
-                .unwrap_or(0);
-            let mut rows: Vec<String> = biggest[..shown]
-                .iter()
-                .map(|item| {
-                    format!(
-                        "{:<width$} {:>11}  {}",
-                        item.name,
-                        size(item.bytes),
-                        ui::dim(&item.what)
-                    )
-                })
-                .collect();
+        if !servers.is_empty() {
+            let mut rows = table(&servers);
             if more > 0 {
                 rows.push(ui::dim(format!(
-                    "and {more} smaller: copal storage --all"
+                    "and {more} smaller, with: copal storage --all"
                 )));
             }
-            ui.say(
-                Mark::Done,
-                format!("Biggest servers and backups\n{}", rows.join("\n")),
-            );
+            ui.say(Mark::Done, rows.join("\n"));
         }
         ui.outro("Free space by deleting backups or servers in Amberite.");
     } else {
-        let mut lines = vec![disk, format!("Core uses {}", size(core))];
+        let mut lines = vec![format!(
+            "Disk: {} used of {}, {} free",
+            size(used),
+            size(usage.total),
+            size(usage.free)
+        )];
+        lines.push(format!("Core uses {}", size(core)));
         lines.extend(
-            parts
+            kinds
                 .iter()
-                .map(|(name, bytes)| format!("{name}: {}", size(*bytes))),
+                .map(|kind| format!("{}: {}", kind.name, size(kind.bytes))),
         );
         lines.push(format!("Data folder: {folder}"));
-        if !biggest.is_empty() {
-            lines.push("Biggest servers and backups:".into());
-            lines.extend(biggest[..shown].iter().map(|item| {
-                format!("{}: {}, {}", item.name, size(item.bytes), item.what)
-            }));
-            if more > 0 {
-                lines.push(format!("and {more} smaller: copal storage --all"));
-            }
+        lines.extend(servers.iter().map(|server| {
+            format!(
+                "{}: {} (files {}, backups {} in {})",
+                super::safe(&server.name),
+                size(server.files + server.backups),
+                size(server.files),
+                size(server.backups),
+                server.backup_count
+            )
+        }));
+        if more > 0 {
+            lines.push(format!("and {more} smaller: copal storage --all"));
         }
         ui.say(Mark::Done, lines.join("\n"));
     }
     Ok(Done::ok(&usage))
+}
+
+/// What Core keeps, by kind, biggest first.
+fn kinds(usage: &DiskUsage) -> Vec<Part> {
+    let sum = |bytes: fn(&ServerUsage) -> u64| {
+        usage.servers.iter().map(bytes).sum::<u64>()
+    };
+    let mut kinds = [
+        ("Servers", sum(|server| server.files)),
+        ("Backups", sum(|server| server.backups)),
+        ("Minecraft and Java", usage.game_files),
+        ("Shared files", usage.shared),
+    ];
+    kinds.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
+    // The biggest is the brand's own colour, and each one after it a shade further off.
+    let tones = [Tone::Accent, Tone::Soft, Tone::Pale, Tone::Grey];
+    kinds
+        .into_iter()
+        .zip(tones)
+        .map(|((name, bytes), tone)| Part { name, bytes, tone })
+        .collect()
+}
+
+/// The servers that take the most, biggest first: all of them with `all`, otherwise the
+/// first few that are worth a megabyte.
+fn biggest(usage: &DiskUsage, all: bool) -> Vec<&ServerUsage> {
+    let mut servers: Vec<&ServerUsage> = usage.servers.iter().collect();
+    servers
+        .sort_by_key(|server| std::cmp::Reverse(server.files + server.backups));
+    if !all {
+        servers.retain(|server| server.files + server.backups >= 1024 * 1024);
+        servers.truncate(BIGGEST);
+    }
+    servers
+}
+
+/// One bar for the whole, then each part under it with its colour, its size and its share.
+fn breakdown(parts: &[Part], whole: u64) -> String {
+    let sizes: Vec<u64> = parts.iter().map(|part| part.bytes).collect();
+    let bar: String = parts
+        .iter()
+        .zip(cells(&sizes, whole, BAR))
+        .map(|(part, cells)| {
+            ui::paint(ui::glyph("━", "=").repeat(cells), part.tone)
+        })
+        .collect();
+    let width = parts.iter().map(|part| part.name.len()).max().unwrap_or(0);
+    let mut lines = vec![bar];
+    lines.extend(parts.iter().map(|part| {
+        let share = if whole == 0 {
+            0.0
+        } else {
+            part.bytes as f64 / whole as f64 * 100.0
+        };
+        format!(
+            "{} {:<width$}  {:>10}  {}",
+            ui::paint(ui::glyph("■", "#"), part.tone),
+            part.name,
+            size(part.bytes),
+            ui::dim(if part.bytes > 0 && share < 1.0 {
+                " <1%".to_owned()
+            } else {
+                format!("{share:>3.0}%")
+            })
+        )
+    }));
+    lines.join("\n")
+}
+
+/// A row per server: what its files take, what its backups take, and both.
+fn table(servers: &[&ServerUsage]) -> Vec<String> {
+    let names: Vec<String> = servers
+        .iter()
+        .map(|server| super::safe(&server.name))
+        .collect();
+    let width = names
+        .iter()
+        .map(|name| name.chars().count())
+        .chain(["Servers".len()])
+        .max()
+        .unwrap_or(0);
+    let mut rows = vec![format!(
+        "{:<width$}  {}",
+        "Servers",
+        ui::dim(format!(
+            "{:>10}  {:>16}  {:>10}",
+            "FILES", "BACKUPS", "TOTAL"
+        ))
+    )];
+    rows.extend(servers.iter().zip(names).map(|(server, name)| {
+        let backups = match server.backup_count {
+            0 => ui::dim(format!("{:>16}", "none")),
+            count => {
+                format!("{:>16}", format!("{} ({count})", size(server.backups)))
+            }
+        };
+        format!(
+            "{name:<width$}  {:>10}  {backups}  {:>10}",
+            size(server.files),
+            size(server.files + server.backups),
+        )
+    }));
+    rows
 }
 
 /// A size as a person reads it. `label` alone rounds everything under a megabyte up to one.
@@ -136,151 +237,90 @@ fn size(bytes: u64) -> String {
     }
 }
 
-/// What Core keeps, by kind.
-fn parts(usage: &DiskUsage) -> [(&'static str, u64); 4] {
-    let sum = |size: fn(&contracts::core::ServerUsage) -> u64| {
-        usage.servers.iter().map(size).sum::<u64>()
-    };
-    [
-        ("Servers", sum(|server| server.files)),
-        ("Backups", sum(|server| server.backups)),
-        ("Shared files", usage.shared),
-        ("Minecraft and Java", usage.game_files),
-    ]
-}
-
-struct Item {
-    name: String,
-    bytes: u64,
-    what: String,
-}
-
-/// Every server and every server's backups, biggest first.
-fn biggest(usage: &DiskUsage) -> Vec<Item> {
-    let mut items: Vec<Item> = usage
-        .servers
+/// How many of `width` cells each of `parts` of `whole` fills. Anything worth a megabyte gets
+/// at least one, and together they never fill more than the bar.
+fn cells(parts: &[u64], whole: u64, width: usize) -> Vec<usize> {
+    let mut cells: Vec<usize> = parts
         .iter()
-        .flat_map(|server| {
-            let name = super::safe(&server.name);
-            [
-                Item {
-                    name: name.clone(),
-                    bytes: server.files,
-                    what: "server".into(),
-                },
-                Item {
-                    name,
-                    bytes: server.backups,
-                    what: match server.backup_count {
-                        1 => "1 backup".into(),
-                        count => format!("{count} backups"),
-                    },
-                },
-            ]
+        .map(|&part| {
+            if part < 1024 * 1024 || whole == 0 {
+                return 0;
+            }
+            let share = part as f64 / whole as f64 * width as f64;
+            (share.round() as usize).clamp(1, width)
         })
-        // What is not worth a megabyte is not worth a line.
-        .filter(|item| item.bytes >= 1024 * 1024)
         .collect();
-    items.sort_by_key(|item| std::cmp::Reverse(item.bytes));
-    items
-}
-
-/// One cell of a bar.
-fn full() -> String {
-    ui::glyph("█", "#")
-}
-
-/// How many of `width` cells `part` of `whole` fills: at least one for anything worth a
-/// megabyte.
-fn cells(part: u64, whole: u64, width: usize) -> usize {
-    if part < 1024 * 1024 || whole == 0 {
-        return 0;
+    // Rounding up the small ones can overflow: the biggest gives the cells back.
+    while cells.iter().sum::<usize>() > width {
+        let biggest = cells
+            .iter_mut()
+            .max_by_key(|cells| **cells)
+            .expect("an overflow has cells");
+        *biggest -= 1;
     }
-    let cells = (part as f64 / whole as f64 * width as f64).round() as usize;
-    cells.clamp(1, width)
-}
-
-/// The whole disk as one bar, each part its own shade: what Core uses, what everything else
-/// uses, and what is free.
-fn disk_bar(core: u64, used: u64, total: u64) -> String {
-    let core_cells = cells(core.min(used), total, BAR);
-    let used_cells = cells(used, total, BAR).max(core_cells);
-    let other = ui::glyph("▓", "=");
-    let free = ui::glyph("░", ".");
-    format!(
-        "{}{}{}\n{}",
-        ui::cyan(full().repeat(core_cells)),
-        other.repeat(used_cells - core_cells),
-        ui::dim(free.repeat(BAR - used_cells)),
-        ui::dim(format!(
-            "{} Core   {other} everything else   {free} free",
-            ui::cyan(full())
-        ))
-    )
+    cells
 }
 
 #[cfg(test)]
 mod tests {
-    use contracts::core::ServerUsage;
-
     use super::*;
 
-    const GB: u64 = 1024 * 1024 * 1024;
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
 
-    #[test]
-    fn the_biggest_items_come_first_and_empty_ones_are_left_out() {
-        let usage = DiskUsage {
+    fn usage() -> DiskUsage {
+        let server = |name: &str, files, backups, backup_count| ServerUsage {
+            id: name.to_lowercase(),
+            name: name.into(),
+            files,
+            backups,
+            backup_count,
+        };
+        DiskUsage {
             total: 100 * GB,
             free: 40 * GB,
             servers: vec![
-                ServerUsage {
-                    id: "a".into(),
-                    name: "Survival".into(),
-                    files: 3 * GB,
-                    backups: 9 * GB,
-                    backup_count: 4,
-                },
-                ServerUsage {
-                    id: "b".into(),
-                    name: "Creative".into(),
-                    files: 5 * GB,
-                    backups: 0,
-                    backup_count: 0,
-                },
+                server("Creative", 5 * GB, 0, 0),
+                server("Survival", 3 * GB, 9 * GB, 4),
+                server("Empty", 165, 0, 0),
             ],
             shared: GB,
             game_files: 2 * GB,
+        }
+    }
+
+    #[test]
+    fn the_biggest_come_first_and_the_trivial_wait_for_all() {
+        let usage = usage();
+        let named = |all| -> Vec<&str> {
+            biggest(&usage, all)
+                .iter()
+                .map(|server| server.name.as_str())
+                .collect()
         };
-        let named: Vec<(String, String)> = biggest(&usage)
-            .into_iter()
-            .map(|item| (item.name, item.what))
-            .collect();
+        assert_eq!(named(false), ["Survival", "Creative"]);
+        assert_eq!(named(true), ["Survival", "Creative", "Empty"]);
+        let kinds: Vec<&str> =
+            kinds(&usage).iter().map(|kind| kind.name).collect();
         assert_eq!(
-            named,
-            [
-                ("Survival".to_owned(), "4 backups".to_owned()),
-                ("Creative".to_owned(), "server".to_owned()),
-                ("Survival".to_owned(), "server".to_owned()),
-            ]
+            kinds,
+            ["Backups", "Servers", "Minecraft and Java", "Shared files"]
         );
-        assert_eq!(parts(&usage)[1], ("Backups", 9 * GB));
     }
 
     #[test]
     fn a_size_is_never_rounded_up_to_a_megabyte() {
         assert_eq!(size(0), "nothing");
         assert_eq!(size(165), "under 1 MB");
-        assert_eq!(size(74 * 1024 * 1024), "74 MB");
+        assert_eq!(size(74 * MB), "74 MB");
         assert_eq!(size(1024 * GB), "1.0 TB");
     }
 
     #[test]
-    fn a_bar_shows_anything_at_all_and_never_overflows() {
-        const MB: u64 = 1024 * 1024;
-        assert_eq!(cells(0, 100 * MB, 10), 0);
-        assert_eq!(cells(165, 100 * MB, 10), 0);
-        assert_eq!(cells(MB, 1000 * MB, 10), 1);
-        assert_eq!(cells(50 * MB, 100 * MB, 10), 5);
-        assert_eq!(cells(200 * MB, 100 * MB, 10), 10);
+    fn a_bar_shows_anything_worth_showing_and_never_overflows() {
+        assert_eq!(cells(&[0, 165, 50 * MB], 100 * MB, 10), [0, 0, 5]);
+        // Three slivers and the rest: each sliver shows, and the bar is still ten wide.
+        assert_eq!(cells(&[MB, MB, MB, 997 * MB], 1000 * MB, 10), [1, 1, 1, 7]);
+        assert_eq!(cells(&[200 * MB], 100 * MB, 10), [10]);
     }
 }

@@ -12,7 +12,7 @@ use super::{
     call::call,
     client, servers,
     status::paired_with,
-    ui::{self, Mark, Ui},
+    ui::{Mark, Ui},
 };
 use crate::daemon::{install, service};
 
@@ -30,7 +30,8 @@ struct Home {
     state: Place,
     /// The running version.
     version: Option<String>,
-    paired: bool,
+    /// Null when Core did not say.
+    paired: Option<bool>,
     /// The one next command. `copal setup` takes an admin.
     next: &'static str,
 }
@@ -38,6 +39,7 @@ struct Home {
 /// What `copal` alone shows: lines that are fine, the line that is not, and what to run next.
 struct Found {
     place: Place,
+    paired: Option<bool>,
     version: Option<String>,
     fine: Vec<String>,
     wrong: Option<String>,
@@ -45,6 +47,9 @@ struct Found {
 }
 
 pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
+    // The commands first, so the last thing on the screen is where this Core is and the next
+    // step.
+    ui.help(<super::Cli as clap::CommandFactory>::command().render_help());
     ui.intro("copal");
     let found = look(client).await;
     if !found.fine.is_empty() {
@@ -61,15 +66,11 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
         "copal setup" => install::as_admin("Set it up with", found.next),
         next => format!("Next: {next}"),
     };
-    ui.outro(if ui.terminal() {
-        format!("{next}\n{}", ui::dim("Every command: copal --help"))
-    } else {
-        next
-    });
+    ui.outro(next);
     Ok(Done::ok(&Home {
         state: found.place,
         version: found.version,
-        paired: found.place == Place::Running,
+        paired: found.paired,
         next: found.next,
     }))
 }
@@ -89,6 +90,7 @@ async fn look(client: &Client) -> Found {
         };
         return Found {
             place,
+            paired: None,
             version: None,
             fine: Vec::new(),
             wrong: Some(wrong.into()),
@@ -116,6 +118,7 @@ async fn look(client: &Client) -> Found {
             };
             Found {
                 place: Place::Running,
+                paired: Some(true),
                 version,
                 fine,
                 wrong,
@@ -124,6 +127,7 @@ async fn look(client: &Client) -> Found {
         }
         Ok(pairing) => Found {
             place: Place::NotPaired,
+            paired: Some(false),
             version,
             fine,
             wrong: Some(format!(
@@ -132,8 +136,10 @@ async fn look(client: &Client) -> Found {
             )),
             next: "copal pair",
         },
+        // It runs: health said so. What it would not say is whether it is paired.
         Err(_) => Found {
-            place: Place::NotRunning,
+            place: Place::Running,
+            paired: None,
             version,
             fine,
             wrong: Some("It does not answer as it should.".into()),

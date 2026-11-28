@@ -30,16 +30,15 @@ use serde_json::Value;
 pub use client::Client;
 use ui::Ui;
 
-/// Core runs Minecraft servers on this computer. Create and manage the servers in Amberite;
-/// this tool manages Core itself.
+/// Manage the Core on this computer. Its Minecraft servers are made and managed in Amberite.
 #[derive(Debug, Parser)]
 #[command(
     name = "copal",
     bin_name = "copal",
     version,
+    styles = ui::help_styles(),
     disable_help_subcommand = true,
-    after_help = "Typed alone, copal says where this Core is and what to do next.\n\
-        Core is set up once, by its installer or with: copal setup (needs an admin)."
+    after_help = "Core is set up once, by its installer or with: copal setup (needs an admin)."
 )]
 pub struct Cli {
     /// Print one JSON document instead of text, for scripts.

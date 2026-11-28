@@ -176,10 +176,16 @@ fn ufw_allowed(status: &str) -> Option<Allowed> {
         let (Some(to), Some(action)) = (words.next(), words.next()) else {
             continue;
         };
-        // `ALLOW` and `ALLOW IN` let traffic in; `ALLOW OUT` and `ALLOW FWD` do not.
-        if !action.starts_with("ALLOW")
-            || matches!(words.next(), Some("OUT" | "FWD"))
-        {
+        if !action.starts_with("ALLOW") {
+            continue;
+        }
+        // `ALLOW` and `ALLOW IN` let traffic in, `ALLOW OUT` and `ALLOW FWD` do not; and only a
+        // rule from `Anywhere` lets everyone in.
+        let from = match words.next() {
+            Some("IN") => words.next(),
+            from => from,
+        };
+        if !from.is_some_and(|from| from.starts_with("Anywhere")) {
             continue;
         }
         let (ports, protocol) = to.split_once('/').unwrap_or((to, ""));
@@ -365,9 +371,13 @@ mod platform {
         {
             found.push(("ufw", allowed));
         }
-        if firewalld()
-            && let Some(ports) = stdout("firewall-cmd", &["--list-ports"])
-        {
+        if firewalld() {
+            // A firewall that runs and will not say what it lets in is not an open one.
+            let Some(ports) = stdout("firewall-cmd", &["--list-ports"]) else {
+                return Rules::Unknown {
+                    why: "firewalld would not list its ports".into(),
+                };
+            };
             found.push(("firewalld", firewalld_allowed(&ports)));
         }
         found
@@ -542,9 +552,10 @@ mod tests {
             ufw_allowed(status).unwrap().missing(16662),
             vec!["UDP 16662".to_string()]
         );
-        // A rule that lets traffic out lets nothing in.
+        // A rule that lets traffic out lets nothing in, and neither does one for a single
+        // address.
         let out = format!(
-            "{status}16662/udp                  ALLOW OUT   Anywhere\n"
+            "{status}16662/udp                  ALLOW OUT   Anywhere\n16662/udp                  ALLOW       192.0.2.10\n"
         );
         assert_eq!(
             ufw_allowed(&out).unwrap().missing(16662),

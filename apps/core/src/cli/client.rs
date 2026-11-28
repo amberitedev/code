@@ -66,7 +66,7 @@ pub const NOT_SET_UP: &str = "Core is not set up on this computer yet.";
 pub const NOT_RUNNING: &str =
     "Core is set up on this computer, but it is not running.";
 pub const NOT_ANSWERING: &str =
-    "Core's service runs, but it answers only the user who set it up.";
+    "Core's service runs, but Core does not answer this user.";
 
 /// What to say when Core drops the connection unanswered. That is how it refuses an account
 /// other than the owner's, root included, but a Core that stops mid-request looks the same, so

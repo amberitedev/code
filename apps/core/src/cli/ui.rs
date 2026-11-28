@@ -5,8 +5,9 @@
 
 use std::{cell::Cell, fmt::Display, io::IsTerminal};
 
+use cliclack::ThemeState;
 use color_eyre::eyre::{Result, bail};
-use console::style;
+use console::{Style, style};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -48,7 +49,9 @@ impl Ui {
             (false, false) => Mode::Plain,
         };
         // Styled text is for a terminal only, whichever stream it ends up on.
-        if mode != Mode::Terminal {
+        if mode == Mode::Terminal {
+            cliclack::set_theme(Amber);
+        } else {
             console::set_colors_enabled(false);
             console::set_colors_enabled_stderr(false);
         }
@@ -63,11 +66,20 @@ impl Ui {
         self.mode == Mode::Terminal
     }
 
+    /// The help text: every command and what it is for. With `--json` it is not shown.
+    pub fn help(&self, help: clap::builder::StyledStr) {
+        match self.mode {
+            Mode::Terminal => println!("{}", help.ansi()),
+            Mode::Plain => println!("{help}"),
+            Mode::Json => {}
+        }
+    }
+
     /// The top of a command's frame, naming the command.
     pub fn intro(&self, command: &str) {
         if self.terminal() {
-            let title = style(format!(" {command} ")).on_cyan().black();
-            let _ = cliclack::intro(title);
+            let _ =
+                cliclack::intro(Tone::Accent.style().bold().apply_to(command));
             self.open.set(true);
         }
     }
@@ -331,8 +343,8 @@ fn commands(text: &str) -> String {
         command
             .split(' ')
             .map(|word| match word.strip_suffix(',') {
-                Some(word) => format!("{},", cyan(word)),
-                None => cyan(word),
+                Some(word) => format!("{},", paint(word, Tone::Accent)),
+                None => paint(word, Tone::Accent),
             })
             .collect::<Vec<_>>()
             .join(" ")
@@ -450,8 +462,180 @@ pub fn red(text: impl Display) -> String {
     style(text).red().to_string()
 }
 
-pub fn cyan(text: impl Display) -> String {
-    style(text).cyan().to_string()
+/// The colours the CLI draws in: Amberite's orange for what leads the eye (the command's
+/// name, the next step, what is picked), lighter shades of it for a second and third part of
+/// a bar, and greys for the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Accent,
+    Soft,
+    Pale,
+    Grey,
+    Faint,
+}
+
+impl Tone {
+    /// The brand's own colours where the terminal shows them exactly, the nearest of the 256
+    /// where it does not.
+    fn style(self) -> Style {
+        let (exact, near) = match self {
+            Self::Accent => ((255, 100, 26), 202),
+            Self::Soft => ((255, 171, 128), 216),
+            Self::Pale => ((255, 220, 190), 223),
+            Self::Grey => ((150, 150, 150), 246),
+            Self::Faint => ((70, 70, 70), 238),
+        };
+        if console::true_colors_enabled_stderr() {
+            Style::new().true_color(exact.0, exact.1, exact.2)
+        } else {
+            Style::new().color256(near)
+        }
+    }
+}
+
+pub fn paint(text: impl Display, tone: Tone) -> String {
+    tone.style().apply_to(text).to_string()
+}
+
+/// The help's headings in the same orange as everything else the CLI leads with.
+pub fn help_styles() -> clap::builder::Styles {
+    use clap::builder::styling::{Color, RgbColor, Style};
+
+    let accent = Style::new()
+        .bold()
+        .fg_color(Some(Color::Rgb(RgbColor(255, 100, 26))));
+    clap::builder::Styles::styled()
+        .header(accent)
+        .usage(accent)
+        .literal(Style::new().bold())
+        .placeholder(Style::new().dimmed())
+}
+
+/// How `cliclack` draws: its own layout, in Amberite's orange, with a frame whose corners are
+/// round and whose rail stays out of the way.
+struct Amber;
+
+impl cliclack::Theme for Amber {
+    fn bar_color(&self, state: &ThemeState) -> Style {
+        match state {
+            ThemeState::Active => Tone::Accent.style(),
+            ThemeState::Cancel => Style::new().red(),
+            ThemeState::Submit => Tone::Faint.style(),
+            ThemeState::Error(_) => Style::new().yellow(),
+        }
+    }
+
+    fn state_symbol_color(&self, state: &ThemeState) -> Style {
+        match state {
+            ThemeState::Submit => Tone::Accent.style(),
+            _ => self.bar_color(state),
+        }
+    }
+
+    fn radio_symbol(&self, state: &ThemeState, selected: bool) -> String {
+        match state {
+            ThemeState::Active if selected => {
+                paint(glyph("●", ">"), Tone::Accent)
+            }
+            ThemeState::Active => dim(glyph("○", " ")),
+            _ => String::new(),
+        }
+    }
+
+    fn checkbox_symbol(
+        &self,
+        state: &ThemeState,
+        selected: bool,
+        active: bool,
+    ) -> String {
+        match state {
+            ThemeState::Active | ThemeState::Error(_) if selected => {
+                paint(glyph("◼", "[+]"), Tone::Accent)
+            }
+            ThemeState::Active | ThemeState::Error(_) if active => {
+                paint(glyph("◻", "[ ]"), Tone::Accent)
+            }
+            ThemeState::Active | ThemeState::Error(_) => dim(glyph("◻", "[ ]")),
+            _ => String::new(),
+        }
+    }
+
+    fn info_symbol(&self) -> String {
+        paint(glyph("●", "*"), Tone::Grey)
+    }
+
+    fn active_symbol(&self) -> String {
+        paint(glyph("◆", "*"), Tone::Accent)
+    }
+
+    fn submit_symbol(&self) -> String {
+        paint(glyph("◇", "o"), Tone::Accent)
+    }
+
+    fn format_intro(&self, title: &str) -> String {
+        let rail = self.bar_color(&ThemeState::Submit);
+        format!(
+            "{}  {title}\n{}\n",
+            rail.apply_to(glyph("╭", "T")),
+            rail.apply_to(glyph("│", "|")),
+        )
+    }
+
+    fn format_outro(&self, message: &str) -> String {
+        let rail = self.bar_color(&ThemeState::Submit);
+        format!("{}  {message}\n", rail.apply_to(glyph("╰", "-")))
+    }
+
+    fn format_outro_cancel(&self, message: &str) -> String {
+        let rail = self.bar_color(&ThemeState::Submit);
+        format!(
+            "{}  {}\n",
+            rail.apply_to(glyph("╰", "-")),
+            style(message).red()
+        )
+    }
+
+    // A prompt someone left says nothing by itself: the frame's last line does.
+    fn format_footer_with_message(
+        &self,
+        state: &ThemeState,
+        message: &str,
+    ) -> String {
+        let (end, bar) = (glyph("╰", "-"), glyph("│", "|"));
+        let line = match state {
+            ThemeState::Active => format!("{end}  {message}"),
+            ThemeState::Error(error) => format!("{end}  {error}"),
+            ThemeState::Cancel | ThemeState::Submit => bar,
+        };
+        format!("{}\n", self.bar_color(state).apply_to(line))
+    }
+
+    fn default_progress_template(&self) -> String {
+        "{msg}  {bar:24.202/238} {pos}/{len}".into()
+    }
+
+    fn format_progress_start(
+        &self,
+        template: &str,
+        grouped: bool,
+        last: bool,
+    ) -> String {
+        let space = if grouped { " " } else { "  " };
+        self.format_progress_with_state(
+            &format!("{{spinner:.202}}{space}{template}"),
+            grouped,
+            last,
+            &ThemeState::Active,
+        )
+    }
+
+    fn spinner_chars(&self) -> String {
+        glyph("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "|/-\\")
+    }
+
+    fn progress_chars(&self) -> String {
+        glyph("━╸─", "#>-")
+    }
 }
 
 #[cfg(test)]

@@ -369,7 +369,7 @@ async function reportState(request: Request, env: Env, body: () => Promise<State
  * A Core as its own calls see it, with whether its owner's account is locked or may not use
  * sharing, so sharing needs no second read.
  */
-type CallingCore = CoreRow & { owner_locked: number; owner_blacklisted: number }
+type CallingCore = CoreRow & { key_hash: string; owner_locked: number; owner_blacklisted: number }
 
 /** The Core a request's key belongs to, or null for a key no Core has. */
 async function findCore(request: Request, env: Env): Promise<CallingCore | null> {
@@ -435,9 +435,17 @@ async function removeCore(request: Request, env: Env, id: string) {
  * Deletes a Core's row, and its server-first shares with it: only that Core could write them.
  * False when the account has no such Core.
  */
-async function deleteCore(env: Env, id: string, ownerId: string): Promise<boolean> {
-	const deleted = await env.DB.prepare('DELETE FROM cores WHERE id = ? AND owner_id = ?')
-		.bind(id, ownerId)
+async function deleteCore(
+	env: Env,
+	id: string,
+	ownerId: string,
+	keyHash: string | null = null,
+): Promise<boolean> {
+	// With a key: only the pairing that key belongs to, not one made again since under another.
+	const deleted = await env.DB.prepare(
+		'DELETE FROM cores WHERE id = ?1 AND owner_id = ?2 AND (?3 IS NULL OR key_hash = ?3)',
+	)
+		.bind(id, ownerId, keyHash)
 		.run()
 	if (!deleted.meta.changes) return false
 	try {
@@ -503,6 +511,6 @@ export const coreRoutes: Route[] = [
 	// The Core's own CLI unpairs it. A Core already removed gets 410 `core_removed`.
 	route(cores.LeaveAccount, noBody, async ({ request, env }) => {
 		const core = await requireListedCore(request, env)
-		await deleteCore(env, core.id, core.owner_id)
+		await deleteCore(env, core.id, core.owner_id, core.key_hash)
 	}),
 ]

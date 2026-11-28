@@ -142,8 +142,12 @@ pub async fn logs(ui: &Ui, client: &Client, lines: usize) -> Result<Done> {
     let query = LogsQuery { lines: Some(lines) };
     let logs = match call::<GetLogs>(client, &(), &query, Empty).await {
         Ok(logs) => logs,
-        // Core is down, or refuses this user (root, under sudo): the file itself, then.
-        Err(error) if !error.is::<super::client::Refused>() => {
+        // Core is down, or refuses this user (root, under sudo): the file itself, then. An
+        // answer Core did give, whatever it was, is not replaced by an old log.
+        Err(error)
+            if error.is::<Unreachable>()
+                || error.is::<super::client::Closed>() =>
+        {
             let folder = Paths::new(config::data_dir()).logs();
             let lines = crate::api::logs::tail(folder, lines.clamp(1, 1000));
             if lines.is_empty() && !error.is::<Unreachable>() {
@@ -152,9 +156,11 @@ pub async fn logs(ui: &Ui, client: &Client, lines: usize) -> Result<Done> {
             if lines.is_empty() {
                 ui.intro("copal logs");
                 let mut stuck = super::client::why_unreachable();
-                // Where Core was set up there is a log, which only an admin may read.
+                // Where Core was set up there is a log, which only an admin may read: someone
+                // who is not one is told how. An admin who got nothing has no log to read.
                 if crate::daemon::service::state()
                     != crate::daemon::service::State::NotRegistered
+                    && !crate::daemon::install::is_admin()
                 {
                     stuck.next = crate::daemon::install::as_admin(
                         "Read its log with",

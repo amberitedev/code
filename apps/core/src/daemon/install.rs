@@ -118,8 +118,10 @@ pub fn setup(
     refuse_data_dir_override("setup")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
+    // Whole only with its accounts too: Core says to run setup again when they are missing.
     if service::state() != service::State::NotRegistered
         && InstallRecord::load(&paths)?.is_some()
+        && Accounts::find()?.is_some()
     {
         ui.say(Mark::Done, "Core is already set up on this computer.");
         if owner.is_some() {
