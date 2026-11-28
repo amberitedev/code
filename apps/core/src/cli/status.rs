@@ -37,7 +37,7 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
     let pairing = call::<GetPairing>(client, &(), &(), Empty).await?;
     let servers = servers::all(client).await?;
 
-    let mut core = vec![format!("Core {} is running", health.version)];
+    let mut core = vec![format!("Amberite Core {} is running", health.version)];
     if pairing.paired {
         core.push(paired_with(&pairing));
     }

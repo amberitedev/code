@@ -85,7 +85,7 @@ pub async fn pair(ui: &Ui, client: &Client, no_wait: bool) -> Result<Done> {
             Ok(status) => status,
             Err(error) => {
                 spinner.clear();
-                return Err(error.wrap_err("Core stopped answering"));
+                return Err(error.wrap_err("Amberite Core stopped answering"));
             }
         };
         if status.paired {
@@ -95,15 +95,15 @@ pub async fn pair(ui: &Ui, client: &Client, no_wait: bool) -> Result<Done> {
                 .await
                 .is_ok_and(|servers| servers.is_empty());
             ui.outro(if empty {
-                "This Core now appears in Amberite. Create its first server there."
+                "This Amberite Core now appears in Amberite. Create its first server there."
             } else {
-                "This Core now appears in Amberite."
+                "This Amberite Core now appears in Amberite."
             });
             return Ok(Done::ok(&status));
         }
         if status.code.is_none() {
             spinner.failed(
-                "That code ran out, and Core could not get a new one from Amberite",
+                "That code ran out, and Amberite Core could not get a new one from Amberite",
             );
             ui.outro("Try again with: copal pair");
             return Ok(Done::failed(&status));
@@ -140,7 +140,7 @@ pub async fn unpair(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
     ui.begin();
     let status = call::<GetPairing>(client, &(), &(), Empty).await?;
     if !status.paired {
-        ui.outro("This Core is not paired. Pair it with: copal pair");
+        ui.outro("This Amberite Core is not paired. Pair it with: copal pair");
         return Ok(Done::ok(&status));
     }
     if !yes {
@@ -155,7 +155,7 @@ pub async fn unpair(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
                 ),
             );
         }
-        if !ui.confirm("Unpair this Core?", "--yes")? {
+        if !ui.confirm("Unpair this Amberite Core?", "--yes")? {
             ui.outro("Nothing was changed.");
             return Ok(Done::ok(&status));
         }
@@ -165,14 +165,14 @@ pub async fn unpair(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
         spinner.clear();
         // Core said no, or said nothing: only the first is a Core that is still paired.
         return Err(if error.is::<super::client::Refused>() {
-            error.wrap_err("This Core is still paired")
+            error.wrap_err("This Amberite Core is still paired")
         } else {
             error.wrap_err(
                 "Unpairing could not be confirmed. See whether it worked with: copal status",
             )
         });
     }
-    spinner.done("This Core is no longer paired");
+    spinner.done("This Amberite Core is no longer paired");
     ui.outro("Pair it again with: copal pair");
     // It worked whatever Core says next, so what it says next cannot fail it.
     let status = call::<GetPairing>(client, &(), &(), Empty).await.unwrap_or(

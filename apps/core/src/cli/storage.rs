@@ -42,7 +42,7 @@ pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
     let used = usage.total.saturating_sub(usage.free);
     let disk = [
         Part {
-            name: "Core",
+            name: "Amberite Core",
             bytes: core.min(used),
             tone: Tone::Accent,
         },
@@ -76,7 +76,7 @@ pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
         ui.say(
             Mark::Done,
             format!(
-                "Core {}\n{}\n{} {folder}",
+                "Amberite Core {}\n{}\n{} {folder}",
                 ui::dim(size(core)),
                 breakdown(&kinds, core),
                 // The path is left plain, so a long one can be folded.
@@ -100,7 +100,7 @@ pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
             size(usage.total),
             size(usage.free)
         )];
-        lines.push(format!("Core uses {}", size(core)));
+        lines.push(format!("Amberite Core uses {}", size(core)));
         lines.extend(
             kinds
                 .iter()
@@ -108,13 +108,16 @@ pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
         );
         lines.push(format!("Data folder: {folder}"));
         lines.extend(servers.iter().map(|server| {
+            let backups = match server.backup_count {
+                0 => "no backups".to_owned(),
+                1 => format!("1 backup of {}", size(server.backups)),
+                count => format!("{count} backups of {}", size(server.backups)),
+            };
             format!(
-                "{}: {} (files {}, backups {} in {})",
+                "{}: {} (files {}, {backups})",
                 super::safe(&server.name),
                 size(server.files + server.backups),
                 size(server.files),
-                size(server.backups),
-                server.backup_count
             )
         }));
         if more > 0 {

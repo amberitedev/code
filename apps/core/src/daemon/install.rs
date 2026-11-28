@@ -123,11 +123,14 @@ pub fn setup(
         && InstallRecord::load(&paths)?.is_some()
         && Accounts::find()?.is_some()
     {
-        ui.say(Mark::Done, "Core is already set up on this computer.");
+        ui.say(
+            Mark::Done,
+            "Amberite Core is already set up on this computer.",
+        );
         if owner.is_some() {
             ui.say(
                 Mark::Warning,
-                "--owner was not applied: the owner is chosen when Core is first set up.",
+                "--owner was not applied: the owner is chosen when Amberite Core is first set up.",
             );
         }
         ui.outro("Check it, and repair what is wrong, with: copal doctor");
@@ -204,9 +207,9 @@ pub fn setup(
         Err(error) => bail!("could not register the service: {error:#}"),
     }
     ui.outro(if cfg!(windows) {
-        "Core is set up. Next: copal pair"
+        "Amberite Core is set up. Next: copal pair"
     } else {
-        "Core is set up. Next, as yourself and without sudo: copal pair"
+        "Amberite Core is set up. Next, as yourself and without sudo: copal pair"
     });
     Ok(Done::ok(&serde_json::json!({ "set_up": true })))
 }
@@ -239,7 +242,7 @@ pub fn uninstall(
                 (
                     false,
                     "Keep them".to_owned(),
-                    "setting Core up again finds them".to_owned(),
+                    "setting Amberite Core up again finds them".to_owned(),
                 ),
                 (
                     true,
@@ -251,21 +254,21 @@ pub fn uninstall(
         )?
     };
     let question = if remove_data {
-        "Remove Core, and delete every server, world and backup?"
+        "Remove Amberite Core, and delete every server, world and backup?"
     } else {
-        "Remove Core from this computer?"
+        "Remove Amberite Core from this computer?"
     };
     if !yes && !ui.confirm(question, "--yes")? {
         ui.outro("Nothing was changed.");
         return Ok(Done::ok(&serde_json::json!({ "uninstalled": false })));
     }
 
-    let spinner = ui.spinner("Stopping Core");
+    let spinner = ui.spinner("Stopping Amberite Core");
     if let Err(error) = stop_core_with_no_servers(&paths, "uninstall")
         .and_then(|()| service::unregister())
     {
         spinner.clear();
-        return Err(error.wrap_err("Core is still set up"));
+        return Err(error.wrap_err("Amberite Core is still set up"));
     }
     spinner.done("Service: removed");
 
@@ -310,11 +313,11 @@ pub fn uninstall(
         match left {
             Some(true) => ui.say(
                 Mark::Done,
-                "Amberite: this Core was removed from its account",
+                "Amberite: this Amberite Core was removed from its account",
             ),
             Some(false) => ui.say(
                 Mark::Warning,
-                "Amberite could not be told. Remove this Core there too, under Settings, Cores.",
+                "Amberite could not be told. Remove this Amberite Core there too, under Settings, Cores.",
             ),
             None => {}
         }
@@ -326,7 +329,7 @@ pub fn uninstall(
             ),
         );
     }
-    ui.outro("Core is uninstalled.");
+    ui.outro("Amberite Core is uninstalled.");
     Ok(Done::ok(&serde_json::json!({
         "uninstalled": true,
         "data_removed": remove_data,
@@ -376,7 +379,7 @@ fn refuse_older_than_active(paths: &Paths) -> Result<()> {
             .is_ok_and(|active| active > current)
     {
         bail!(
-            "Core has updated itself to {}, newer than this copal ({current}), and may have changed its database past what {current} can open. Run setup with copal {} or newer, or pass --allow-downgrade to set up {current} anyway",
+            "Amberite Core has updated itself to {}, newer than this copal ({current}), and may have changed its database past what {current} can open. Run setup with copal {} or newer, or pass --allow-downgrade to set up {current} anyway",
             state.active,
             state.active
         );

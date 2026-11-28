@@ -30,7 +30,7 @@ pub struct Closed(String);
 
 /// Core could not be reached over the local socket.
 #[derive(Debug, thiserror::Error)]
-#[error("Core is not running, or this account may not use it")]
+#[error("Amberite Core is not running, or this account may not use it")]
 pub struct Unreachable;
 
 /// Something is in the way, and there is one thing to do about it. A terminal shows the two
@@ -62,11 +62,12 @@ pub fn why_unreachable() -> Stuck {
     }
 }
 
-pub const NOT_SET_UP: &str = "Core is not set up on this computer yet.";
+pub const NOT_SET_UP: &str =
+    "Amberite Core is not set up on this computer yet.";
 pub const NOT_RUNNING: &str =
-    "Core is set up on this computer, but it is not running.";
+    "Amberite Core is set up on this computer, but it is not running.";
 pub const NOT_ANSWERING: &str =
-    "Core's service runs, but Core does not answer this user.";
+    "Amberite Core's service runs, but it does not answer this user.";
 
 /// What to say when Core drops the connection unanswered. That is how it refuses an account
 /// other than the owner's, root included, but a Core that stops mid-request looks the same, so
@@ -75,9 +76,9 @@ pub const NOT_ANSWERING: &str =
 fn refused_message() -> String {
     // The pipe itself keeps other users out on Windows: there, this is a Core that died.
     if cfg!(windows) {
-        return "Core stopped answering".into();
+        return "Amberite Core stopped answering".into();
     }
-    let closed = "Core closed the connection without answering. It does that for every account but the one that set it up";
+    let closed = "Amberite Core closed the connection without answering. It does that for every account but the one that set it up";
     match std::env::var("SUDO_USER") {
         Ok(user) if !user.is_empty() => format!(
             "{closed}, root included: run it again without sudo, as that account (was it {user}?)"
@@ -144,14 +145,14 @@ impl Client {
         let body = response.into_body().collect().await?.to_bytes();
         if status == axum::http::StatusCode::NOT_FOUND && body.is_empty() {
             bail!(
-                "this Core does not know {path}; it may be older than this copal CLI"
+                "this Amberite Core does not know {path}; it may be older than this copal CLI"
             );
         }
         if !status.is_success() {
             match serde_json::from_slice::<ApiError>(&body) {
                 Ok(error) => return Err(Refused(error).into()),
                 Err(_) => bail!(
-                    "Core answered {status}: {}",
+                    "Amberite Core answered {status}: {}",
                     String::from_utf8_lossy(&body).trim()
                 ),
             }
@@ -166,7 +167,7 @@ impl Client {
             self.connect().await?,
         )
         .await
-        .wrap_err("Core refused the event socket")?;
+        .wrap_err("Amberite Core refused the event socket")?;
         Ok(socket)
     }
 

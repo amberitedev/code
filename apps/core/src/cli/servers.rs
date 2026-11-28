@@ -230,8 +230,7 @@ async fn accept(ui: &Ui, client: &Client, flag: bool) -> Result<()> {
                 eula.url
             ),
         );
-        let question =
-            "Do you accept the Minecraft EULA, for every server on this Core?";
+        let question = "Do you accept the Minecraft EULA, for every server on this Amberite Core?";
         if !ui.confirm(question, "--accept-eula")? {
             bail!(
                 "the server was not started: the Minecraft EULA is not accepted"

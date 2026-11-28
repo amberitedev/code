@@ -22,5 +22,5 @@ where
         .send(request::<E>("", params, query, body, None)?)
         .await?;
     E::Response::decode(status, content_type.as_deref(), answer)
-        .wrap_err("Core answered something this CLI cannot read")
+        .wrap_err("Amberite Core answered something this CLI cannot read")
 }

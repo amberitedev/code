@@ -81,11 +81,11 @@ enum Silent {
 impl Silent {
     fn why(&self) -> String {
         match self {
-            Self::Down => "They need Core running".into(),
+            Self::Down => "They need Amberite Core running".into(),
             Self::Root | Self::Foreign => {
-                "Core answers only the user who set it up".into()
+                "Amberite Core answers only the user who set it up".into()
             }
-            Self::Other(why) => format!("Core did not answer: {why}"),
+            Self::Other(why) => format!("Amberite Core did not answer: {why}"),
         }
     }
 }
@@ -100,9 +100,9 @@ enum Repair {
 impl Repair {
     fn label(self) -> String {
         match self {
-            Self::StartService => "Start Core's service".into(),
+            Self::StartService => "Start Amberite Core's service".into(),
             Self::OpenFirewall(port) => format!(
-                "Let Core's ports through this computer's firewall (TCP and UDP {port}, and the server ports)"
+                "Let Amberite Core's ports through this computer's firewall (TCP and UDP {port}, and the server ports)"
             ),
         }
     }
@@ -289,7 +289,7 @@ async fn examine(ui: &Ui, client: &Client, admin: bool) -> Vec<Check> {
         ui.progress(CORE_CHECKS.len() as u64 + 3, "Checking the service");
     let service = service::state();
     progress.step();
-    progress.message("Asking Core, the router and Amberite");
+    progress.message("Asking Amberite Core, the router and the backend");
     let core = call::<GetDoctor>(client, &(), &(), Empty).await;
     for _ in CORE_CHECKS {
         progress.step();
@@ -379,9 +379,9 @@ fn checks(
         (Ok(doctor), _) if doctor.installed => own(
             "service",
             CheckState::Warn,
-            "Core runs, but not from its service, so it will not start with this computer".into(),
+            "Amberite Core runs, but not from its service, so it will not start with this computer".into(),
             vec![as_admin(
-                "Stop the Core that runs by hand, then start its service with",
+                "Stop the Amberite Core that runs by hand, then start its service with",
                 if cfg!(windows) {
                     "sc start copal"
                 } else if cfg!(target_os = "macos") {
@@ -395,21 +395,21 @@ fn checks(
         (Ok(_), _) => own(
             "service",
             CheckState::Warn,
-            "Core runs by hand, not as a service, so it stops when its terminal closes".into(),
+            "Amberite Core runs by hand, not as a service, so it stops when its terminal closes".into(),
             vec![set_up],
             None,
         ),
         (Err(_), service::State::NotRegistered) => own(
             "service",
             CheckState::Fail,
-            "Core is not set up on this computer yet".into(),
+            "Amberite Core is not set up on this computer yet".into(),
             vec![set_up],
             None,
         ),
         (Err(_), service::State::Stopped) => own(
             "service",
             CheckState::Fail,
-            "Core's service is stopped".into(),
+            "Amberite Core's service is stopped".into(),
             vec![fix_with("Start")],
             Some(Repair::StartService),
         ),
@@ -417,24 +417,24 @@ fn checks(
         (Err(Silent::Root), service::State::Running) => own(
             "service",
             CheckState::Ok,
-            "the service is running. Core does not answer root".into(),
+            "the service is running. Amberite Core does not answer root".into(),
             vec![],
             None,
         ),
         (Err(Silent::Other(why)), service::State::Running) => own(
             "service",
             CheckState::Fail,
-            format!("Core answered with an error: {why}"),
+            format!("Amberite Core answered with an error: {why}"),
             vec!["See why with: copal logs".into()],
             None,
         ),
         (Err(_), service::State::Running) => own(
             "service",
             CheckState::Fail,
-            "the service runs, but Core does not answer this user".into(),
+            "the service runs, but Amberite Core does not answer this user".into(),
             vec![
-                "Use the user account that set Core up.".into(),
-                as_admin("Read Core's log with", "copal logs"),
+                "Use the user account that set Amberite Core up.".into(),
+                as_admin("Read Amberite Core's log with", "copal logs"),
             ],
             None,
         ),
@@ -453,14 +453,14 @@ fn checks(
         _ if never_set_up => own(
             "firewall",
             CheckState::Skip,
-            "setting Core up opens it".into(),
+            "setting Amberite Core up opens it".into(),
             vec![],
             None,
         ),
         firewall::Rules::Open => own(
             "firewall",
             CheckState::Ok,
-            "lets Core and its servers in".into(),
+            "lets Amberite Core and its servers in".into(),
             vec![],
             None,
         ),
@@ -486,7 +486,7 @@ fn checks(
         ),
     };
     firewall_check.check.details = vec![CheckDetail {
-        label: "Core needs".into(),
+        label: "Amberite Core needs".into(),
         value: ports,
     }];
     let mut checks = vec![service_check, firewall_check, wrap(disk, None)];
@@ -572,7 +572,7 @@ async fn started(client: &Client) -> Result<(), String> {
         }
     }
     Err(
-        "the service started, but Core does not answer yet. See why with: copal logs"
+        "the service started, but Amberite Core does not answer yet. See why with: copal logs"
             .into(),
     )
 }
@@ -797,7 +797,7 @@ mod tests {
             plain(&checks, false),
             "1 problem:\n\
              fail firewall: the rule allows TCP but not UDP 16662\n    \
-             Core needs  TCP 16662, UDP 16662 and the server ports 25565-25664\n    \
+             Amberite Core needs  TCP 16662, UDP 16662 and the server ports 25565-25664\n    \
              fix: Open it with: copal doctor --fix\n\
              This computer:\n\
              ok   service: running, and starts with this computer\n\
@@ -828,7 +828,7 @@ mod tests {
         assert_eq!(skipped, CORE_CHECKS.len());
         assert!(plain(&checks, false).ends_with(
             "ok   disk: plenty\n\
-             Skipped: java, pairing, backend, router, ports. They need Core running."
+             Skipped: java, pairing, backend, router, ports. They need Amberite Core running."
         ));
     }
 
@@ -853,8 +853,9 @@ mod tests {
             [("firewall".to_owned(), Repair::OpenFirewall(16662))]
         );
         assert!(
-            plain(&checks, false)
-                .ends_with("Core answers only the user who set it up.")
+            plain(&checks, false).ends_with(
+                "Amberite Core answers only the user who set it up."
+            )
         );
     }
 
@@ -872,7 +873,7 @@ mod tests {
         assert_eq!(checks[0].check.state, CheckState::Fail);
         assert_eq!(
             checks[0].check.fix[0],
-            "Use the user account that set Core up."
+            "Use the user account that set Amberite Core up."
         );
     }
 

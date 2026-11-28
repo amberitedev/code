@@ -30,7 +30,7 @@ use serde_json::Value;
 pub use client::Client;
 use ui::Ui;
 
-/// Manage the Core on this computer. Its Minecraft servers are made and managed in Amberite.
+/// Manage the Amberite Core on this computer. Its Minecraft servers are made and managed in Amberite.
 #[derive(Debug, Parser)]
 #[command(
     name = "copal",
@@ -38,7 +38,7 @@ use ui::Ui;
     version,
     styles = ui::help_styles(),
     disable_help_subcommand = true,
-    after_help = "Core is set up once, by its installer or with: copal setup (needs an admin)."
+    after_help = "Amberite Core is set up once, by its installer or with: copal setup (needs an admin)."
 )]
 pub struct Cli {
     /// Print one JSON document instead of text, for scripts.
@@ -50,12 +50,12 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Show whether Core runs, who it is paired with, and its servers.
+    /// Show whether Amberite Core runs, who it is paired with, and its servers.
     #[command(
         after_help = "For a script, copal list prints the servers alone, and --json prints everything."
     )]
     Status,
-    /// Check everything Core needs, problems first, each with its fix.
+    /// Check everything Amberite Core needs, problems first, each with its fix.
     #[command(
         after_help = "Exits with 1 when a check fails, and with 0 when there are only warnings."
     )]
@@ -67,19 +67,19 @@ pub enum Command {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Pair this Core with your Amberite account.
+    /// Pair this Amberite Core with your Amberite account.
     Pair {
         /// Show the code and leave, instead of waiting until it is approved.
         #[arg(long)]
         no_wait: bool,
     },
-    /// Remove this Core from its Amberite account.
+    /// Remove this Amberite Core from its Amberite account.
     Unpair {
         /// Do not ask first.
         #[arg(short, long)]
         yes: bool,
     },
-    /// List the servers on this Core.
+    /// List the servers on this Amberite Core.
     #[command(
         after_help = "Piped, each server is one line of tab-separated columns: name, state, what it runs, port, who is online (empty when nobody is), id."
     )]
@@ -112,18 +112,18 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Show the end of Core's own log.
+    /// Show the end of Amberite Core's own log.
     #[command(
-        after_help = "A terminal shows this computer's time. Piped, each line is as Core wrote it, in UTC."
+        after_help = "A terminal shows this computer's time. Piped, each line is as Amberite Core wrote it, in UTC."
     )]
     Logs {
         /// How many lines, up to 1000.
         #[arg(short = 'n', long, default_value_t = 100)]
         lines: usize,
     },
-    /// Update Core, or change how it updates.
+    /// Update Amberite Core, or change how it updates.
     Update(update::UpdateArgs),
-    /// Remove Core from this computer. Needs an admin.
+    /// Remove Amberite Core from this computer. Needs an admin.
     Uninstall {
         /// Also delete the data folder: every server, world, and backup.
         #[arg(long, conflicts_with = "keep_data")]
@@ -135,34 +135,34 @@ pub enum Command {
         #[arg(short, long)]
         yes: bool,
     },
-    /// Set Core up as a service on this machine. The installer runs this once, as admin.
+    /// Set Amberite Core up as a service on this machine. The installer runs this once, as admin.
     #[command(hide = true)]
     Setup {
         /// The account that may use the copal CLI. Defaults to the one running setup.
         #[arg(long)]
         owner: Option<String>,
-        /// Set up this copal even when Core has updated itself to a newer version.
+        /// Set up this copal even when Amberite Core has updated itself to a newer version.
         #[arg(long)]
         allow_downgrade: bool,
     },
-    /// Run Core in the foreground. The service runs this.
+    /// Run Amberite Core in the foreground. The service runs this.
     #[command(hide = true)]
     Run {
         /// Set by the Windows service manager.
         #[arg(long, hide = true)]
         service: bool,
     },
-    /// Core itself, as `copal run` starts it. Not for people.
+    /// Amberite Core itself, as `copal run` starts it. Not for people.
     #[command(hide = true)]
     Core,
-    /// Supervise one run of a server. Core starts this; it is not for people.
+    /// Supervise one run of a server. Amberite Core starts this; it is not for people.
     #[command(hide = true)]
     Shim {
         #[arg(long)]
         data_dir: PathBuf,
         server: String,
     },
-    /// The shared file pool's store. Core starts this; it is not for people.
+    /// The shared file pool's store. Amberite Core starts this; it is not for people.
     #[command(hide = true)]
     Store(sharing_storage::Args),
 }
@@ -315,7 +315,9 @@ pub async fn run(command: Option<Command>, json: bool) -> bool {
             | Command::Shim { .. }
             | Command::Store(_),
         ) => {
-            unreachable!("main runs the commands that do not talk to Core")
+            unreachable!(
+                "main runs the commands that do not talk to Amberite Core"
+            )
         }
     };
     finish(&ui, json, result)

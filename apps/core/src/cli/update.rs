@@ -46,7 +46,7 @@ pub struct UpdateArgs {
     /// Install the newest release even when it was tried here and rolled back.
     #[arg(long)]
     pub retry: bool,
-    /// Install the channel's release even when it is older than this Core.
+    /// Install the channel's release even when it is older than this Amberite Core.
     #[arg(long)]
     pub allow_downgrade: bool,
 }
@@ -82,7 +82,7 @@ pub async fn run(ui: &Ui, client: &Client, args: UpdateArgs) -> Result<Done> {
     };
     if let Some(error) = &status.check_error {
         spinner.failed(format!("Could not look for a newer release: {error}"));
-        ui.outro("Core tries again by itself. copal logs says more.");
+        ui.outro("Amberite Core tries again by itself. copal logs says more.");
         return Ok(Done::failed(&status));
     }
     let forced = args.retry || args.allow_downgrade;
@@ -91,15 +91,17 @@ pub async fn run(ui: &Ui, client: &Client, args: UpdateArgs) -> Result<Done> {
         .clone()
         .filter(|_| status.update_available || forced)
     else {
-        spinner.done(format!("Core {} is up to date", status.version));
+        spinner.done(format!("Amberite Core {} is up to date", status.version));
         if let Some((_, text)) = news(&status) {
             ui.say(Mark::Warning, text);
         }
         ui.outro(settings(&status));
         return Ok(Done::ok(&status));
     };
-    let available =
-        format!("Core {latest} is available. You have {}", status.version);
+    let available = format!(
+        "Amberite Core {latest} is available. You have {}",
+        status.version
+    );
     // With nobody to ask, say so before anything is printed as if it had worked.
     if !args.check && !args.yes && !ui.terminal() {
         spinner.clear();
@@ -113,12 +115,13 @@ pub async fn run(ui: &Ui, client: &Client, args: UpdateArgs) -> Result<Done> {
         ui.outro("Install it with: copal update");
         return Ok(Done::ok(&status));
     }
-    let question = format!("Install Core {latest} now? Servers keep running.");
+    let question =
+        format!("Install Amberite Core {latest} now? Servers keep running.");
     if !args.yes && !ui.confirm_expected(&question, "--yes")? {
         ui.outro("Not installed. Install it later with: copal update");
         return Ok(Done::ok(&status));
     }
-    let spinner = ui.spinner(format!("Installing Core {latest}"));
+    let spinner = ui.spinner(format!("Installing Amberite Core {latest}"));
     let apply = ApplyUpdate {
         allow_downgrade: args.allow_downgrade,
         retry: args.retry,
@@ -128,12 +131,15 @@ pub async fn run(ui: &Ui, client: &Client, args: UpdateArgs) -> Result<Done> {
             Ok(restarting) => restarting,
             Err(error) => {
                 spinner.clear();
-                return Err(
-                    error.wrap_err(format!("Core {latest} was not installed"))
-                );
+                return Err(error.wrap_err(format!(
+                    "Amberite Core {latest} was not installed"
+                )));
             }
         };
-    spinner.message(format!("Restarting into Core {}", restarting.version));
+    spinner.message(format!(
+        "Restarting into Amberite Core {}",
+        restarting.version
+    ));
     Ok(restarted(ui, client, spinner, restarting.version, "Updated").await)
 }
 
@@ -142,7 +148,7 @@ async fn roll_back(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
     let status = call::<GetUpdate>(client, &(), &(), Empty).await?;
     let Some(previous) = &status.previous else {
         ui.outro(format!(
-            "Core {} has no earlier version to go back to.",
+            "Amberite Core {} has no earlier version to go back to.",
             status.version
         ));
         return Ok(Done::failed(&status));
@@ -152,22 +158,22 @@ async fn roll_back(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
             ui.say(
                 Mark::Warning,
                 format!(
-                    "Going back to Core {previous} also brings back the database from before the update.\nWhat changed in Core since then is lost. Servers and their worlds are not touched."
+                    "Going back to Amberite Core {previous} also brings back the database from before the update.\nWhat changed in Amberite Core since then is lost. Servers and their worlds are not touched."
                 ),
             );
         }
-        let question = format!("Go back to Core {previous}?");
+        let question = format!("Go back to Amberite Core {previous}?");
         if !ui.confirm(&question, "--yes")? {
             ui.outro("Nothing was changed.");
             return Ok(Done::ok(&status));
         }
     }
-    let spinner = ui.spinner(format!("Going back to Core {previous}"));
+    let spinner = ui.spinner(format!("Going back to Amberite Core {previous}"));
     let restarting = match call::<RollBack>(client, &(), &(), Empty).await {
         Ok(restarting) => restarting,
         Err(error) => {
             spinner.clear();
-            return Err(error.wrap_err("Core did not go back"));
+            return Err(error.wrap_err("Amberite Core did not go back"));
         }
     };
     Ok(restarted(ui, client, spinner, restarting.version, "Went back").await)
@@ -191,7 +197,7 @@ pub fn news(status: &UpdateStatus) -> Option<(bool, String)> {
         return Some((
             false,
             format!(
-                "Core {latest} is available. Install it with: copal update"
+                "Amberite Core {latest} is available. Install it with: copal update"
             ),
         ));
     }
@@ -207,7 +213,7 @@ pub fn news(status: &UpdateStatus) -> Option<(bool, String)> {
     Some((
         true,
         format!(
-            "Core {failed} was tried and rolled back: it {how}.\nCore stays on {} until a newer release. Try {failed} again with: copal update --retry",
+            "Amberite Core {failed} was tried and rolled back: it {how}.\nAmberite Core stays on {} until a newer release. Try {failed} again with: copal update --retry",
             status.version
         ),
     ))
@@ -261,18 +267,18 @@ async fn restarted(
     .map_or("did not prove healthy", describe_failure);
     match (outcome, &running) {
         (RestartOutcome::Running, _) => {
-            spinner.done(format!("Core {requested} is running"));
+            spinner.done(format!("Amberite Core {requested} is running"));
             ui.outro(format!("{done}. Servers kept running."));
         }
         (RestartOutcome::WentBack, Some(running)) => {
             spinner.failed(format!(
-                "Core {requested} {how}, so Core went back to {running}"
+                "Amberite Core {requested} {how}, so Amberite Core went back to {running}"
             ));
             ui.outro("Nothing was lost. copal logs says more.");
         }
         _ => {
             spinner.failed(format!(
-                "Core did not answer after restarting into {requested}"
+                "Amberite Core did not answer after restarting into {requested}"
             ));
             ui.outro("Find out why with: copal doctor");
         }

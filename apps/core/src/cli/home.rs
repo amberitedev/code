@@ -97,7 +97,7 @@ async fn look(client: &Client) -> Found {
             next,
         };
     };
-    let mut fine = vec![format!("Core {} is running", health.version)];
+    let mut fine = vec![format!("Amberite Core {} is running", health.version)];
     let version = Some(health.version);
     match call::<GetPairing>(client, &(), &(), Empty).await {
         Ok(pairing) if pairing.paired => {
