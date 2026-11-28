@@ -80,11 +80,22 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
         ui.outro(match crashed {
             Some(server) => {
                 let name = super::safe(&server.name);
-                // A name with a space in it would need quoting: the list to pick from, then.
-                let named = if name.contains(char::is_whitespace) {
-                    String::new()
-                } else {
+                // Named only when the name is one plain word that no other server shares:
+                // anything else would need quoting, or pick two. The list to pick from, then.
+                let plain = name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+                let shared = servers
+                    .iter()
+                    .filter(|other| {
+                        other.name.to_lowercase() == server.name.to_lowercase()
+                    })
+                    .count()
+                    > 1;
+                let named = if plain && !shared {
                     format!(" {name}")
+                } else {
+                    String::new()
                 };
                 format!(
                     "{name} crashed. See why in Amberite, or start it again with: copal start{named}"

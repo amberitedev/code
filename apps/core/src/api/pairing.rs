@@ -123,7 +123,10 @@ pub async fn remove(
 /// Take this Core off its account on the backend, with its own key. A backend that no longer knows
 /// it is as good as done.
 async fn leave_account(state: &CoreState) -> Result<(), ApiError> {
-    match leave(&state.db, state.storage.backend_url()).await {
+    match leave(&state.db, state.storage.backend_url())
+        .await
+        .map_err(internal)?
+    {
         Some(false) => Err(ApiError::new(
             ErrorCode::InternalError,
             "Core could not reach Amberite to leave the account. Check the internet connection and try again, or remove this Core in Amberite under Settings, Cores.",
@@ -135,34 +138,47 @@ async fn leave_account(state: &CoreState) -> Result<(), ApiError> {
 /// Whether the backend took the Core in `db` off its account. `None` when there is nothing to
 /// leave: no backend, or not paired. `copal uninstall` calls this too, before it deletes the
 /// key with the data folder.
-pub async fn leave(db: &SqlitePool, backend_url: Option<&str>) -> Option<bool> {
-    let base = backend_url?;
-    let key: String = sqlx::query_scalar(
+pub async fn leave(
+    db: &SqlitePool,
+    backend_url: Option<&str>,
+) -> sqlx::Result<Option<bool>> {
+    let Some(base) = backend_url else {
+        return Ok(None);
+    };
+    let key: Option<String> = sqlx::query_scalar(
         "SELECT backend_key FROM core WHERE id = 1 AND owner_user_id IS NOT NULL",
     )
     .fetch_optional(db)
-    .await
-    .ok()??;
+    .await?
+    .flatten();
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    Ok(Some(told(base, &key).await))
+}
+
+/// Whether the backend took the Core with `key` off its account.
+async fn told(base: &str, key: &str) -> bool {
     let Ok(http) = crate::network::http().build() else {
-        return Some(false);
+        return false;
     };
     let remote = Remote {
         http: &http,
         base,
-        bearer: Some(&key),
+        bearer: Some(key),
         ticket: None,
         timeout: Some(LEAVE_TIMEOUT),
     };
     match call::<LeaveAccount>(&remote, &(), &(), Empty).await {
-        Ok(_) => Some(true),
+        Ok(_) => true,
         Err(CallError::Api { error, .. })
             if error.error == ErrorCode::CoreRemoved =>
         {
-            Some(true)
+            true
         }
         Err(error) => {
             tracing::warn!(%error, "could not leave the account");
-            Some(false)
+            false
         }
     }
 }

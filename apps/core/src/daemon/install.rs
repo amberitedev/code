@@ -332,21 +332,36 @@ pub fn uninstall(
 }
 
 /// Take the Core on this data folder off its account, before the folder goes. `None` when it
-/// is not paired or has no database, `Some(false)` when the backend could not be told.
+/// is not paired or has no database, `Some(false)` when the backend could not be told. The
+/// database is only read, never migrated: this binary may be older than the Core that last
+/// wrote it.
 fn left_account(paths: &Paths, backend_url: Option<&str>) -> Option<bool> {
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
     let database = paths.database();
     if !database.exists() {
         return None;
     }
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .ok()?;
+    else {
+        return Some(false);
+    };
     runtime.block_on(async {
-        let db = crate::db::open(&database).await.ok()?;
+        let options = SqliteConnectOptions::new()
+            .filename(&database)
+            .read_only(true);
+        let Ok(db) = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+        else {
+            return Some(false);
+        };
         let left = crate::api::pairing::leave(&db, backend_url).await;
         db.close().await;
-        left
+        left.unwrap_or(Some(false))
     })
 }
 

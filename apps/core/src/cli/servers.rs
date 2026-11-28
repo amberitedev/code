@@ -284,10 +284,11 @@ pub async fn stop(
     } else {
         (PowerAction::Stop, "Stopping")
     };
-    let mut stopped = Vec::new();
+    // Stopping throws the players out, so someone has to mean it: asked of every server before
+    // any is stopped, so a no, or nobody to ask, leaves them all as they were.
+    let mut confirmed = Vec::new();
     for server in &chosen {
         let name = super::safe(&server.name);
-        // Stopping throws the players out, so someone has to mean it.
         if let Some(players) = server.players.as_deref()
             && !players.is_empty()
             && !yes
@@ -301,10 +302,23 @@ pub async fn stop(
                 super::safe(&players.join(", "))
             );
             if !ui.confirm(&question, "--yes")? {
-                ui.outro(format!("{name} keeps running."));
-                return Ok(Done::ok(&stopped));
+                continue;
             }
         }
+        confirmed.push(server);
+    }
+    let mut stopped = Vec::new();
+    if confirmed.is_empty() {
+        ui.outro(match chosen.as_slice() {
+            [server] => {
+                format!("{} keeps running.", super::safe(&server.name))
+            }
+            _ => "Nothing was stopped.".to_owned(),
+        });
+        return Ok(Done::ok(&stopped));
+    }
+    for server in confirmed {
+        let name = super::safe(&server.name);
         let spinner = ui.spinner(if kill {
             format!("{doing} {name} without saving")
         } else {

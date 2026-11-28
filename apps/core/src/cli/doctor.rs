@@ -221,7 +221,7 @@ pub async fn run(
             )
         } else if let Some(step) = unchecked {
             format!("{totals}. {step}")
-        } else if problems + warnings + skipped == 0 {
+        } else if problems + warnings == 0 {
             format!("{totals}. Everything works.")
         } else {
             format!("{totals}.")
@@ -278,7 +278,7 @@ async fn examine(ui: &Ui, client: &Client, admin: bool) -> Vec<Check> {
     let core = core.map_err(|error| {
         if error.is::<Unreachable>() {
             Silent::Down
-        } else if cfg!(unix) && admin {
+        } else if cfg!(unix) && admin && !error.is::<super::client::Refused>() {
             Silent::Root
         } else {
             Silent::Other(format!("{error:#}"))
@@ -378,7 +378,7 @@ fn checks(
         (Err(Silent::Root), service::State::Running) => own(
             "service",
             CheckState::Ok,
-            "running, and starts with this computer".into(),
+            "the service is running".into(),
             vec![],
             None,
         ),
@@ -430,7 +430,12 @@ fn checks(
             "firewall",
             CheckState::Skip,
             why,
-            vec![as_admin("Check it with", "copal doctor")],
+            // More rights can read it; an admin who could not has nothing further to try.
+            if admin {
+                vec![]
+            } else {
+                vec![as_admin("Check the firewall with", "copal doctor")]
+            },
             None,
         ),
     };
@@ -494,15 +499,18 @@ async fn apply(
 }
 
 /// Wait for a Core that was just started to answer. On Linux and macOS this runs as root,
-/// whom Core does not answer, so there the service manager's word is taken.
+/// whom Core hears and then refuses: that too says it is up and listening.
 async fn started(client: &Client) -> Result<(), String> {
     for _ in 0..30 {
-        if client.is_up().await
-            || (cfg!(unix) && service::state() == service::State::Running)
+        match call::<contracts::core::CheckHealth>(client, &(), &(), Empty)
+            .await
         {
-            return Ok(());
+            Ok(_) => return Ok(()),
+            Err(error) if cfg!(unix) && !error.is::<Unreachable>() => {
+                return Ok(());
+            }
+            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     Err(
         "the service started, but Core does not answer yet. See why with: copal logs"
