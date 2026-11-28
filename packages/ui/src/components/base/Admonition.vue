@@ -215,7 +215,7 @@ const progressTrackClasses = {
 	warning: 'bg-brand-orange/20',
 	'circle-warning': 'bg-brand-orange/20',
 	critical: 'bg-brand-red/20',
-	success: 'bg-brand/20',
+	success: 'bg-brand-highlight',
 	moderation: 'bg-brand-orange/20',
 	neutral: 'bg-surface-4',
 }

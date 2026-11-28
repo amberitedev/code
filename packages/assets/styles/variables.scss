@@ -337,9 +337,9 @@ html {
 	--color-button-bg: var(--surface-4);
 	--color-button-bg-hover: var(--surface-5);
 	--color-clear-button-bg-hover: var(--color-button-bg);
-	--color-orange-accent-button-bg-hover: #43301d;
-	--color-left-nav-button-bg-hover: #3d2519;
-	--color-sidebar-button-bg-hover: #351f15;
+	--color-orange-accent-button-bg-hover: var(--surface-5);
+	--color-left-nav-button-bg-hover: var(--surface-4);
+	--color-sidebar-button-bg-hover: var(--surface-4);
 	--color-sidebar-accent-border: var(--surface-5);
 	--color-button-border: var(--surface-5);
 	--color-scrollbar: var(--surface-5);
@@ -353,7 +353,7 @@ html {
 	--color-accent-contrast: #ffffff;
 
 	--color-red-highlight: rgba(255, 59, 59, 0.25);
-	--color-orange-highlight: rgba(255, 100, 26, 0.25);
+	--color-orange-highlight: rgba(255, 255, 255, 0.08);
 	--color-warning-highlight: rgba(255, 138, 31, 0.25);
 	--color-green-highlight: var(--color-orange-highlight);
 	--color-blue-highlight: rgba(79, 156, 255, 0.25);
@@ -361,7 +361,7 @@ html {
 	--color-gray-highlight: rgba(133, 133, 140, 0.25);
 
 	--color-red-bg: rgba(255, 59, 59, 0.2);
-	--color-orange-bg: rgba(255, 100, 26, 0.2);
+	--color-orange-bg: var(--color-orange-highlight);
 	--color-warning-bg: #43301d;
 	--color-green-bg: var(--color-orange-bg);
 	--color-blue-bg: rgba(79, 156, 255, 0.2);
@@ -400,8 +400,8 @@ html {
 
 	--loading-bar-gradient: linear-gradient(to right, var(--color-brand) 0%, var(--color-brand) 100%);
 
-	--splash-tint-top: rgba(180, 82, 32, 0.275);
-	--splash-tint-bottom: rgba(43, 24, 17, 0.5);
+	--splash-tint-top: rgba(15, 15, 15, 0.3);
+	--splash-tint-bottom: rgba(15, 15, 15, 0.6);
 	--splash-overlay: rgba(22, 24, 28, 0.64);
 	--splash-cube-opacity: 0.8;
 	--splash-cube-blend: normal;
@@ -437,9 +437,9 @@ html {
 	--surface-4: #1a1a1a;
 	--surface-5: #2a2a2a;
 	--color-clear-button-bg-hover: var(--color-button-bg);
-	--color-orange-accent-button-bg-hover: #43301d;
-	--color-left-nav-button-bg-hover: #2c170d;
-	--color-sidebar-button-bg-hover: #261208;
+	--color-orange-accent-button-bg-hover: var(--surface-5);
+	--color-left-nav-button-bg-hover: var(--surface-4);
+	--color-sidebar-button-bg-hover: var(--surface-4);
 
 	--color-ad: #0d1828;
 

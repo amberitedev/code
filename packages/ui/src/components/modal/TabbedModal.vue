@@ -129,7 +129,7 @@ function tabClasses(tab: Tab, index: number) {
 			: 'bg-transparent text-orange hover:bg-highlight-orange'
 	}
 	return isSelected
-		? 'bg-[color-mix(in_srgb,var(--color-brand)_30%,transparent)] text-brand'
+		? 'bg-brand-highlight text-brand'
 		: 'bg-transparent text-primary hover:bg-surface-4 hover:text-contrast'
 }
 

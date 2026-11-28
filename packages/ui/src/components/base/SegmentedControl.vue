@@ -135,8 +135,8 @@ onUnmounted(() => resizeObserver?.disconnect())
 
 <style scoped>
 .indicator[data-tone='brand'] {
-	background-color: color-mix(in srgb, var(--color-brand) 30%, var(--surface-3));
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-brand) 60%, transparent);
+	background-color: var(--color-brand-highlight);
+	box-shadow: inset 0 0 0 1px var(--surface-5);
 }
 
 .indicator[data-tone='neutral'] {

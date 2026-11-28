@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { CircleSlashIcon, ImportIcon, ModrinthIcon, PlusIcon } from '@modrinth/assets'
+import { CircleSlashIcon, ImportIcon, PlusIcon } from '@modrinth/assets'
 import { Button, defineMessages, IntlFormatted, SplitButton, useVIntl } from '@modrinth/ui'
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
+
+import amberiteMark from '../../assets/welcome/amberite-mark.svg?url'
 
 const showCreationModal = inject<() => void>('showCreationModal')
 const showImportModal = inject<() => void>('showImportModal')
@@ -107,11 +109,8 @@ onUnmounted(() => {
 					class="dot-pattern pointer-events-none absolute left-1/2 -top-52 -z-10 h-[29.875rem] w-[min(25.9375rem,80vw)] -translate-x-1/2 rounded-2xl [@media(max-height:700px)]:h-[23rem]"
 					aria-hidden="true"
 				/>
-				<div
-					class="flex size-[6.25rem] items-center justify-center rounded-[22px] border border-solid border-brand/30 bg-brand-highlight p-4 text-brand"
-				>
-					<ModrinthIcon class="pointer-events-none size-full" aria-hidden="true" />
-				</div>
+				<!-- Placeholder until Amberite has a logo. -->
+				<img :src="amberiteMark" alt="" class="pointer-events-none size-[6.25rem]" />
 				<div class="flex flex-col items-center gap-2">
 					<h1 class="m-0 flex items-center gap-2 text-2xl font-semibold leading-8 text-contrast">
 						{{ formatMessage(messages.welcomeTitle) }}
