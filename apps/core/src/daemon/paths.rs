@@ -1,6 +1,6 @@
 //! The data folder. Its layout is the isolation story: Core runs as the `copal` OS account and
 //! every server and custom Java runs as `copal-servers`, which may touch only what
-//! [`FOLDERS`] grants it. `copal install` creates the folders with these permissions (see
+//! [`FOLDERS`] grants it. `copal setup` creates the folders with these permissions (see
 //! `daemon::folders`); nothing else may put a file Core trusts somewhere `copal-servers` can write.
 //!
 //! The data folder itself is owned by `copal` and only listable by others. Besides the folders it
@@ -152,7 +152,7 @@ impl Paths {
         self.root.join("db").join("core.lock")
     }
 
-    /// What `copal install` recorded. See `daemon::install::InstallRecord`.
+    /// What `copal setup` recorded. See `daemon::install::InstallRecord`.
     pub fn install_record(&self) -> PathBuf {
         self.root.join("db").join("install.toml")
     }

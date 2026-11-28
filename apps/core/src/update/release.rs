@@ -147,9 +147,9 @@ pub enum ManifestError {
     WrongVersion { expected: Version, found: Version },
     #[error("the release manifest puts {version} on the wrong channel")]
     WrongChannel { version: Version },
-    #[error("this release has no Copal for {0}")]
+    #[error("this release has no Core for {0}")]
     NoTarget(String),
-    #[error("Copal is not released for this platform")]
+    #[error("Core is not released for this platform")]
     UnsupportedPlatform,
 }
 

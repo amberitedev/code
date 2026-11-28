@@ -369,7 +369,7 @@ async function reportState(request: Request, env: Env, body: () => Promise<State
  * A Core as its own calls see it, with whether its owner's account is locked or may not use
  * sharing, so sharing needs no second read.
  */
-type CallingCore = CoreRow & { owner_locked: number; owner_blacklisted: number }
+type CallingCore = CoreRow & { key_hash: string; owner_locked: number; owner_blacklisted: number }
 
 /** The Core a request's key belongs to, or null for a key no Core has. */
 async function findCore(request: Request, env: Env): Promise<CallingCore | null> {
@@ -424,21 +424,36 @@ async function listCores(request: Request, env: Env): Promise<ListedCore[]> {
 
 /**
  * App: the owner takes a Core off the account. Its key stops working at once; the Core notices on
- * its next call and signs out on its own. Its server-first shares go with it: only that Core could
- * write them.
+ * its next call and signs out on its own.
  */
 async function removeCore(request: Request, env: Env, id: string) {
 	const user = await requireUser(request, env)
-	const deleted = await env.DB.prepare('DELETE FROM cores WHERE id = ? AND owner_id = ?')
-		.bind(id, user.id)
+	if (!(await deleteCore(env, id, user.id))) throw new ApiError(404, 'not_found', 'Core not found')
+}
+
+/**
+ * Deletes a Core's row, and its server-first shares with it: only that Core could write them.
+ * False when the account has no such Core.
+ */
+async function deleteCore(
+	env: Env,
+	id: string,
+	ownerId: string,
+	keyHash: string | null = null,
+): Promise<boolean> {
+	// With a key: only the pairing that key belongs to, not one made again since under another.
+	const deleted = await env.DB.prepare(
+		'DELETE FROM cores WHERE id = ?1 AND owner_id = ?2 AND (?3 IS NULL OR key_hash = ?3)',
+	)
+		.bind(id, ownerId, keyHash)
 		.run()
-	if (!deleted.meta.changes) throw new ApiError(404, 'not_found', 'Core not found')
+	if (!deleted.meta.changes) return false
 	try {
 		const shares = (
 			await env.DB.prepare(
 				'DELETE FROM shared_instances WHERE core_id = ? AND owner_id = ? RETURNING id',
 			)
-				.bind(id, user.id)
+				.bind(id, ownerId)
 				.all<{ id: string }>()
 		).results
 		for (const share of shares) await sweepFiles(env, share.id)
@@ -448,6 +463,7 @@ async function removeCore(request: Request, env: Env, id: string) {
 			.unlink()
 			.catch((error: unknown) => console.warn('could not drop the link of a removed Core', error))
 	}
+	return true
 }
 
 export const coreRoutes: Route[] = [
@@ -492,4 +508,9 @@ export const coreRoutes: Route[] = [
 	route(cores.RemoveCore, noBody, ({ request, env, params }) =>
 		removeCore(request, env, params.id),
 	),
+	// The Core's own CLI unpairs it. A Core already removed gets 410 `core_removed`.
+	route(cores.LeaveAccount, noBody, async ({ request, env }) => {
+		const core = await requireListedCore(request, env)
+		await deleteCore(env, core.id, core.owner_id, core.key_hash)
+	}),
 ]

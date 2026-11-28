@@ -13,7 +13,7 @@ use super::{
     paths::{FOLDERS, Paths},
 };
 
-/// Create every folder that is missing. With `accounts` (`copal install`), also set each
+/// Create every folder that is missing. With `accounts` (`copal setup`), also set each
 /// folder's owner and permissions; without (development), leave them as the OS makes them.
 pub fn create(paths: &Paths, accounts: Option<&Accounts>) -> Result<()> {
     let create = |path: &std::path::Path| {

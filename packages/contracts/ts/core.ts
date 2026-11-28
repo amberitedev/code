@@ -119,6 +119,10 @@ export type Action = { "action": "signed_in", "metadata": { session_id: string, 
 
 export type PairingStatus = { paired: boolean, 
 /**
+ * The owner's name while paired.
+ */
+owner: string | null, 
+/**
  * The code to enter in the App, like `MZUX-D576`. Null once paired, and while the Core is
  * still getting one from Amberite.
  */
@@ -592,6 +596,58 @@ export type ReachabilityCheck = {
  */
 passed: boolean | null, text: string, };
 
+export type Doctor = { 
+/**
+ * The Core's port, which the firewall must let in: TCP and UDP.
+ */
+port: number, 
+/**
+ * Installed as a service. False for a Core someone runs by hand.
+ */
+installed: boolean, checks: Array<DoctorCheck>, };
+
+export type DoctorCheck = { 
+/**
+ * One lowercase word that names the check, such as `pairing`.
+ */
+name: string, state: CheckState, 
+/**
+ * What was found, in one line.
+ */
+summary: string, 
+/**
+ * The facts behind the summary.
+ */
+details: Array<CheckDetail>, 
+/**
+ * What to do about it, first step first. Empty when nothing is wrong.
+ */
+fix: Array<string>, };
+
+export type CheckState = "ok" | "warn" | "fail" | "skip";
+
+export type CheckDetail = { label: string, value: string, };
+
+export type DiskUsage = { 
+/**
+ * The size of the disk the data folder is on.
+ */
+total: number, free: number, servers: Array<ServerUsage>, 
+/**
+ * The shared files the store holds.
+ */
+shared: number, 
+/**
+ * Minecraft, loaders and Java, which the servers share.
+ */
+game_files: number, };
+
+export type ServerUsage = { id: string, name: string, 
+/**
+ * The server's folder: its world, mods and settings.
+ */
+files: number, backups: number, backup_count: number, };
+
 export type Performance = { 
 /**
  * The most memory Java may use. Java starts with less and grows to it.
@@ -704,6 +760,8 @@ export const core = {
 	AcceptEula: { method: "POST", path: "/eula", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Eula>,
 	GetLogs: { method: "GET", path: "/logs", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, LogsQuery, void, CoreLogs>,
 	GetMachine: { method: "GET", path: "/machine", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Machine>,
+	GetDoctor: { method: "GET", path: "/doctor", auth: "session", dangerous: false, untimed: true, body: "empty", response: "json" } as Endpoint<null, null, void, Doctor>,
+	GetDiskUsage: { method: "GET", path: "/disk", auth: "session", dangerous: false, untimed: true, body: "empty", response: "json" } as Endpoint<null, null, void, DiskUsage>,
 	ListServers: { method: "GET", path: "/servers", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<null, null, void, Array<Server>>,
 	CreateServer: { method: "POST", path: "/servers", auth: "session", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewServer, ServerId>,
 	GetServer: { method: "GET", path: "/servers/{id}", auth: "session", dangerous: false, untimed: false, body: "empty", response: "json" } as Endpoint<ServerId, null, void, Server>,

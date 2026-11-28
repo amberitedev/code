@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Download the copal binary for this machine from the newest Copal release on a channel. The
 # release manifest's minisign signature is checked against the release key first, then the
-# binary against the manifest's SHA-256. Then run `sudo copal install` to set Copal up as a
+# binary against the manifest's SHA-256. Then run `sudo copal setup` to set Copal up as a
 # service. From there Core updates itself and checks every update's signature the same way.
 set -eu
 
@@ -93,4 +93,4 @@ EOF
 mkdir -p "$install_dir"
 install -m 0755 "$temporary_dir/copal" "$install_dir/copal"
 printf '%s\n' "Installed Copal ${tag#copal-v} to $install_dir/copal"
-printf '%s\n' "Set it up as a service with: sudo $install_dir/copal install"
+printf '%s\n' "Set it up as a service with: sudo $install_dir/copal setup"

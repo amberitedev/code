@@ -565,7 +565,7 @@ impl Backups {
             }
             Some(Phase::Unmanaged(_)) => {
                 return Err(Error::Conflict(
-                    "Another Copal version started this server, so Core cannot hold its saves. Restart it, then back it up."
+                    "Another Core version started this server, so Core cannot hold its saves. Restart it, then back it up."
                         .into(),
                 ));
             }
@@ -893,7 +893,7 @@ impl Manifest {
         let refuse =
             |reason: &str| Error::Conflict(format!("This backup {reason}."));
         if self.v != 1 {
-            return Err(refuse("was made by another Copal version"));
+            return Err(refuse("was made by another Core version"));
         }
         let Some(level) = self.worlds.first() else {
             return Err(refuse("names no world"));

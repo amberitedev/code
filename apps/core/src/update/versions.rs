@@ -8,7 +8,7 @@
 //!   writes it while it tries a new version.
 //!
 //! Without `state.json` the launcher runs its own binary, as in development and right after
-//! `copal install`.
+//! `copal setup`.
 
 use std::{
     io,
@@ -33,13 +33,13 @@ pub struct State {
     #[serde(default)]
     pub restore_database: bool,
     /// The last version that failed its health check and was rolled back from. Neither
-    /// auto-update nor `copal update apply` installs it again unless asked to retry.
+    /// auto-update nor `copal update` installs it again unless asked to retry.
     pub failed: Option<String>,
     /// How `failed` failed. Launchers from before this field leave it out.
     pub failed_reason: Option<FailedTrial>,
 }
 
-/// What happened, for a person, after "Copal <version>".
+/// What happened, for a person, after "Core <version>".
 pub fn describe_failure(trial: FailedTrial) -> &'static str {
     match trial {
         FailedTrial::NotStarted => {

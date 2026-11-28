@@ -5,7 +5,7 @@
 //! for the answer each time it wakes. Where no socket opens, it polls instead. The owner enters the
 //! code in the App, which approves it with their account; from then on the key works. The App never talks to the Core during pairing. The code being shown is kept
 //! in the `pairing` table, so every copal process on one data folder shows the same code, and
-//! `copal status` reads it there. `copal pair` drops it and wakes the loop for a fresh one.
+//! `copal pair` reads it there, or drops it and wakes the loop for a fresh one.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -115,7 +115,7 @@ pub async fn pair(state: &Pairing<'_>) {
                         "\nThis Core cannot sign in yet: {problem}\nRetrying in {} seconds.\n",
                         RETRY.as_secs()
                     );
-                    // Also in Core's log, where `copal status` sends the owner.
+                    // Also in Core's log, which the owner reads with `copal logs`.
                     warn!("no pairing code yet: {problem}");
                     tokio::time::sleep(RETRY).await;
                     continue;

@@ -63,7 +63,7 @@ pub struct Report {
 pub struct Network {
     db: SqlitePool,
     api_port: u16,
-    /// `copal install` opened the firewall.
+    /// `copal setup` opened the firewall.
     installed: bool,
     /// Off with `forward_ports` off, and in tests, which must not talk to the router.
     on: bool,
@@ -122,6 +122,27 @@ impl Routing {
 /// Whether the run a check started for still runs. Core's own API always does.
 type Current<'a> = &'a (dyn Fn() -> bool + Sync);
 
+/// What [`Network::check_now`] found: Core's own port, and every port the router was asked to
+/// forward.
+#[derive(Debug, Clone)]
+pub struct Checked {
+    pub facts: Facts,
+    /// The router this computer sends internet traffic through.
+    pub gateway: Option<Ipv4Addr>,
+    pub mappings: Vec<Mapped>,
+}
+
+/// One port the router was asked to forward.
+#[derive(Debug, Clone)]
+pub struct Mapped {
+    /// Ready to print: `Core` or `server "SMP"`.
+    pub what: String,
+    pub transport: Transport,
+    pub port: u16,
+    /// The outside port the router granted, or its refusal in words.
+    pub outside: Result<u16, String>,
+}
+
 impl Network {
     /// `on` is the `forward_ports` setting.
     pub fn new(
@@ -148,6 +169,16 @@ impl Network {
         Self::new(db, 0, false, false)
     }
 
+    /// The Core's API port, which the store and Connect share.
+    pub fn api_port(&self) -> u16 {
+        self.api_port
+    }
+
+    /// Whether `copal setup` installed this Core.
+    pub fn installed(&self) -> bool {
+        self.installed
+    }
+
     /// The last check of a server's port, or of Core's with [`CORE`].
     pub fn report(&self, key: &str) -> Option<Report> {
         self.reports.lock().expect("not poisoned").get(key).cloned()
@@ -169,24 +200,99 @@ impl Network {
         *self.connect_port.lock().expect("not poisoned")
     }
 
-    /// Ask the router to forward Connect's UDP port, or renew that.
-    async fn forward_connect(&self) {
-        let Some(local) =
-            public_ip::local_ipv4().filter(|ip| is_private(IpAddr::V4(*ip)))
-        else {
-            *self.connect_port.lock().expect("not poisoned") = None;
-            return;
+    /// Ask the router to forward Connect's UDP port, or renew that. `None` when there is no
+    /// router to ask.
+    async fn forward_connect(&self) -> Option<Result<u16, String>> {
+        let local =
+            public_ip::local_ipv4().filter(|ip| is_private(IpAddr::V4(*ip)));
+        let mapping = match local {
+            Some(local) => match self
+                .forward(CONNECT, local, self.api_port, Transport::Udp, &|| {
+                    true
+                })
+                .await
+            {
+                Some(RouterFacts::Found { mapping, .. }) => Some(mapping),
+                _ => None,
+            },
+            None => None,
         };
-        let granted = match self
-            .forward(CONNECT, local, self.api_port, Transport::Udp, &|| true)
-            .await
+        *self.connect_port.lock().expect("not poisoned") =
+            mapping.clone().and_then(Result::ok);
+        mapping
+    }
+
+    /// Ask the router for Core's ports and every running server's now, looking for it again
+    /// when none answered before. `None` while forwarding is off.
+    pub async fn check_now(&self, servers: &Servers) -> Option<Checked> {
+        if !self.on {
+            return None;
+        }
         {
-            Some(RouterFacts::Found {
-                mapping: Ok(port), ..
-            }) => Some(port),
-            _ => None,
-        };
-        *self.connect_port.lock().expect("not poisoned") = granted;
+            let mut routing = self.routing.lock().await;
+            if routing.router.is_none() {
+                routing.searched = None;
+            }
+        }
+        let (local_ip, router) = self
+            .ask_router(CORE, self.api_port, Transport::Tcp, &|| true)
+            .await?;
+        let mut mappings = Vec::new();
+        if let RouterFacts::Found { mapping, .. } = &router {
+            mappings.push(Mapped {
+                what: "Core".into(),
+                transport: Transport::Tcp,
+                port: self.api_port,
+                outside: mapping.clone(),
+            });
+        }
+        if let Some(outside) = self.forward_connect().await {
+            mappings.push(Mapped {
+                what: "Core".into(),
+                transport: Transport::Udp,
+                port: self.api_port,
+                outside,
+            });
+        }
+        for id in servers.running() {
+            let Some(run) = servers.run_of(&id) else {
+                continue;
+            };
+            let Ok(Some(server)) =
+                server_rows::get(&self.db, servers.engine(), &id).await
+            else {
+                continue;
+            };
+            let Ok(port) = u16::try_from(server.port) else {
+                continue;
+            };
+            let current = || servers.run_of(&id) == Some(run);
+            if let Some((_, RouterFacts::Found { mapping, .. })) =
+                self.ask_router(&id, port, Transport::Tcp, &current).await
+            {
+                mappings.push(Mapped {
+                    what: format!("server \"{}\"", server.name),
+                    transport: Transport::Tcp,
+                    port,
+                    outside: mapping,
+                });
+            }
+        }
+        Some(Checked {
+            facts: Facts {
+                what: "Core's store".into(),
+                port: self.api_port,
+                transport: Transport::Tcp,
+                local_ip,
+                // Core's port listens while Core answers this.
+                listening: true,
+                firewall: self.firewall(),
+                router,
+                outside: not_tested(),
+            },
+            gateway: router::default_gateway(),
+            mappings,
+        })
     }
 
     /// Forward and check Core's API and every running server, then follow servers starting
@@ -257,7 +363,9 @@ impl Network {
         }
         if all || !mapped.contains(CONNECT) {
             let me = Arc::clone(self);
-            tokio::spawn(async move { me.forward_connect().await });
+            tokio::spawn(async move {
+                me.forward_connect().await;
+            });
         }
         for id in running {
             if all || !mapped.contains(&id) {
@@ -296,6 +404,29 @@ impl Network {
         .await;
     }
 
+    /// This computer's address, and what the router did when asked to forward `port` for
+    /// `key`. `None` when the run it is for ended.
+    async fn ask_router(
+        &self,
+        key: &str,
+        port: u16,
+        transport: Transport,
+        current: Current<'_>,
+    ) -> Option<(IpAddr, RouterFacts)> {
+        let local = public_ip::local_ipv4();
+        let router = match local {
+            None => RouterFacts::NoProtocol {
+                gateway: router::default_gateway(),
+            },
+            Some(ip) if !is_private(IpAddr::V4(ip)) => RouterFacts::NoNat,
+            Some(ip) => self.forward(key, ip, port, transport, current).await?,
+        };
+        Some((
+            local.map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), IpAddr::V4),
+            router,
+        ))
+    }
+
     async fn open(
         &self,
         key: &str,
@@ -303,32 +434,20 @@ impl Network {
         port: u16,
         current: Current<'_>,
     ) {
-        let local = public_ip::local_ipv4();
-        let router = match local {
-            None => RouterFacts::NoProtocol {
-                gateway: router::default_gateway(),
-            },
-            Some(ip) if !is_private(IpAddr::V4(ip)) => RouterFacts::NoNat,
-            Some(ip) => {
-                match self.forward(key, ip, port, Transport::Tcp, current).await
-                {
-                    Some(router) => router,
-                    None => return,
-                }
-            }
+        let Some((local_ip, router)) =
+            self.ask_router(key, port, Transport::Tcp, current).await
+        else {
+            return;
         };
-        let listening = listening(port).await;
         let facts = Facts {
             what,
             port,
-            local_ip: local
-                .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), IpAddr::V4),
-            listening,
+            transport: Transport::Tcp,
+            local_ip,
+            listening: listening(port).await,
             firewall: self.firewall(),
             router,
-            outside: Outside::NotChecked(
-                "this Core has no test from the internet yet".into(),
-            ),
+            outside: not_tested(),
         };
         let diagnosis = diagnose(&facts);
         let mut reports = self.reports.lock().expect("not poisoned");
@@ -474,21 +593,25 @@ impl Network {
         }
     }
 
-    /// `copal install` opens the firewall for Core's port and the server ports, and Core never
-    /// changes it, so after install it is open as far as Core knows.
+    /// `copal setup` opens the firewall for Core's port and the server ports, and Core never
+    /// changes it, so after setup it is open as far as Core knows.
     fn firewall(&self) -> Firewall {
         if self.installed {
             Firewall::Open
         } else {
             Firewall::Unsure {
-                found: "Copal runs without copal install, which opens it".into(),
+                found: "Core runs without copal setup, which opens it".into(),
                 fix: vec![
-                    "Run copal install as admin. It opens the firewall for Core's port and the server ports."
+                    "Run copal doctor --fix as admin. It opens the firewall for Core's port and the server ports."
                         .into(),
                 ],
             }
         }
     }
+}
+
+fn not_tested() -> Outside {
+    Outside::NotChecked("this Core has no test from the internet yet".into())
 }
 
 /// Whether a check found something other than the one before it: another case or another

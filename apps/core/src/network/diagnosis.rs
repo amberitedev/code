@@ -9,7 +9,9 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
-use super::{firewall::Firewall, is_private, is_shared_range};
+use super::{
+    firewall::Firewall, is_private, is_shared_range, router::Transport,
+};
 
 /// Everything measured about one port.
 #[derive(Debug, Clone)]
@@ -18,6 +20,8 @@ pub struct Facts {
     pub what: String,
     /// The port on this computer.
     pub port: u16,
+    /// What the port carries, for the steps that name it.
+    pub transport: Transport,
     pub local_ip: IpAddr,
     /// Whether something on this computer accepts connections on the port.
     pub listening: bool,
@@ -184,8 +188,9 @@ pub fn diagnose(facts: &Facts) -> Diagnosis {
             check(Mark::Skip, format!("This computer's firewall: {found}"))
         }
     }
+    let protocol = protocol(facts);
     let manual_forward = format!(
-        "Or forward the port by hand in the router's settings: protocol TCP, outside port {port}, to address {local}, inside port {port}."
+        "Or forward the port by hand in the router's settings: protocol {protocol}, outside port {port}, to address {local}, inside port {port}."
     );
     match &facts.router {
         RouterFacts::NoNat => check(
@@ -276,8 +281,16 @@ pub fn diagnose(facts: &Facts) -> Diagnosis {
 
 type Verdict = (Case, String, Vec<String>, Vec<String>);
 
+fn protocol(facts: &Facts) -> &'static str {
+    match facts.transport {
+        Transport::Tcp => "TCP",
+        Transport::Udp => "UDP",
+    }
+}
+
 fn decide(facts: &Facts, manual_forward: &str) -> Verdict {
     let port = facts.port;
+    let protocol = protocol(facts);
     if !facts.listening {
         return (
             Case::NotListening,
@@ -329,7 +342,7 @@ fn decide(facts: &Facts, manual_forward: &str) -> Verdict {
                 )],
                 [
                     vec![format!(
-                        "In the provider's control panel, allow incoming TCP on port {port} (often called a firewall rule or security group)."
+                        "In the provider's control panel, allow incoming {protocol} on port {port} (often called a firewall rule or security group)."
                     )],
                     firewall_note,
                 ]
@@ -374,7 +387,7 @@ fn decide(facts: &Facts, manual_forward: &str) -> Verdict {
                     vec![
                         "Set the provider's box to bridge mode (also called modem mode), so only one router is left. Core then opens the port by itself.".into(),
                         format!(
-                            "Or, in the provider's box, forward TCP port {port} to {wan}. Core keeps the inner router open."
+                            "Or, in the provider's box, forward {protocol} port {port} to {wan}. Core keeps the inner router open."
                         ),
                         "If the outer box is not yours to change, nothing on this computer can fix it.".into(),
                     ],
@@ -483,6 +496,7 @@ mod tests {
         Facts {
             what: "Minecraft server \"SMP\"".into(),
             port: 25565,
+            transport: Transport::Tcp,
             local_ip: ip("192.168.1.20"),
             listening: true,
             firewall: Firewall::Open,

@@ -34,6 +34,20 @@ pub fn unregister() -> Result<()> {
     platform::unregister()
 }
 
+/// Where the service is, as anyone on the machine can see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    /// Not registered, or it cannot be told.
+    NotRegistered,
+    Stopped,
+    Running,
+}
+
+/// The service's state now. Needs no admin rights.
+pub fn state() -> State {
+    platform::state()
+}
+
 #[cfg(windows)]
 mod platform {
     use std::{
@@ -62,13 +76,13 @@ mod platform {
         System::Services::SetServiceObjectSecurity,
     };
 
-    use super::NAME;
+    use super::{NAME, State};
     use crate::daemon::{
         accounts::CORE,
         win::{SecurityDescriptor, check},
     };
 
-    /// The default service permissions, set explicitly so a registration from an older Copal,
+    /// The default service permissions, set explicitly so a registration from an older Core,
     /// which let `copal` stop and start the service, loses that. The launcher restarts Core
     /// itself, so `copal` needs no control over the service.
     const PERMISSIONS: &str = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)         (A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)";
@@ -133,6 +147,25 @@ mod platform {
             .start::<&str>(&[])
             .wrap_err("the service did not start")?;
         Ok(format!("Windows service \"{NAME}\" registered and started"))
+    }
+
+    /// The service's permissions let interactive users query it.
+    pub fn state() -> State {
+        let status = ServiceManager::local_computer(
+            None::<&str>,
+            ServiceManagerAccess::CONNECT,
+        )
+        .and_then(|manager| {
+            manager.open_service(NAME, ServiceAccess::QUERY_STATUS)
+        })
+        .and_then(|service| service.query_status());
+        match status.map(|status| status.current_state) {
+            Err(_) => State::NotRegistered,
+            Ok(ServiceState::Stopped | ServiceState::StopPending) => {
+                State::Stopped
+            }
+            Ok(_) => State::Running,
+        }
     }
 
     pub fn stop() -> Result<()> {
@@ -237,7 +270,7 @@ mod platform {
                     async move { stop.notified().await },
                 ))
             });
-        // Any other exit makes the service manager start Copal again.
+        // Any other exit makes the service manager start Core again.
         let exit_code = match result {
             Ok(0) => ServiceExitCode::Win32(0),
             Ok(code) => ServiceExitCode::ServiceSpecific(code as u32),
@@ -260,10 +293,30 @@ mod platform {
 
     use color_eyre::eyre::Result;
 
-    use super::NAME;
+    use super::{NAME, State};
     use crate::daemon::accounts::CORE;
 
     const UNIT: &str = "/etc/systemd/system/copal.service";
+
+    pub fn state() -> State {
+        if !systemd() || !Path::new(UNIT).exists() {
+            return State::NotRegistered;
+        }
+        let active = std::process::Command::new("systemctl")
+            .args(["is-active", NAME])
+            .output()
+            .is_ok_and(|output| {
+                matches!(
+                    String::from_utf8_lossy(&output.stdout).trim(),
+                    "active" | "activating" | "reloading"
+                )
+            });
+        if active {
+            State::Running
+        } else {
+            State::Stopped
+        }
+    }
 
     /// Whether systemd runs this machine. WSL without systemd and containers do not.
     fn systemd() -> bool {
@@ -352,10 +405,33 @@ mod platform {
 
     use color_eyre::eyre::Result;
 
+    use super::State;
     use crate::daemon::accounts::CORE;
 
     const LABEL: &str = "dev.amberite.copal";
     const PLIST: &str = "/Library/LaunchDaemons/dev.amberite.copal.plist";
+
+    /// `launchctl print` fails for a daemon that is not loaded.
+    pub fn state() -> State {
+        if !Path::new(PLIST).exists() {
+            return State::NotRegistered;
+        }
+        match Command::new("launchctl")
+            .args(["print", &format!("system/{LABEL}")])
+            .output()
+        {
+            Ok(output)
+                if output.status.success()
+                    && String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .any(|line| line.trim() == "state = running") =>
+            {
+                State::Running
+            }
+            Ok(_) => State::Stopped,
+            Err(_) => State::NotRegistered,
+        }
+    }
 
     pub fn register(
         exe: &Path,
@@ -395,12 +471,24 @@ mod platform {
     }
 
     pub fn start() -> Result<()> {
-        let output = Command::new("launchctl")
-            .args(["bootstrap", "system", PLIST])
-            .output()?;
+        // A daemon launchd still has loaded is started again in place: bootstrapping it twice
+        // fails.
+        let target = format!("system/{LABEL}");
+        let loaded = Command::new("launchctl")
+            .args(["print", &target])
+            .output()?
+            .status
+            .success();
+        let args: &[&str] = if loaded {
+            &["kickstart", "-k", &target]
+        } else {
+            &["bootstrap", "system", PLIST]
+        };
+        let output = Command::new("launchctl").args(args).output()?;
         if !output.status.success() {
             color_eyre::eyre::bail!(
-                "launchctl bootstrap failed: {}",
+                "launchctl {} failed: {}",
+                args[0],
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }

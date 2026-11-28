@@ -1,4 +1,4 @@
-//! The two OS accounts `copal install` creates. Core and its shims run as `copal`; Java and
+//! The two OS accounts `copal setup` creates. Core and its shims run as `copal`; Java and
 //! anything else that runs a server's code runs as `copal-servers`, which reaches only the
 //! folders `paths::FOLDERS` grants it. Neither can log on interactively.
 
@@ -53,12 +53,12 @@ impl Accounts {
 
 /// Create both accounts, or bring existing ones up to date. Needs admin.
 pub fn create() -> Result<Created> {
-    platform::create().wrap_err("could not create the Copal accounts")
+    platform::create().wrap_err("could not create the copal accounts")
 }
 
 /// Delete both accounts. Accounts that are already gone are skipped. Needs admin.
 pub fn remove() -> Result<()> {
-    platform::remove().wrap_err("could not remove the Copal accounts")
+    platform::remove().wrap_err("could not remove the copal accounts")
 }
 
 /// The OS id of the account running this process, as the install record stores it.
@@ -356,12 +356,12 @@ mod platform {
         user(
             CORE,
             &core_password,
-            "Runs Copal, the Minecraft server manager",
+            "Runs Amberite Core, the Minecraft server manager",
         )?;
         user(
             SERVERS,
             &servers_password,
-            "Runs the Minecraft servers Copal manages",
+            "Runs the Minecraft servers Amberite Core manages",
         )?;
         let accounts = find()?.ok_or_else(|| {
             color_eyre::eyre::eyre!("the accounts were not created")

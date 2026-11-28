@@ -124,7 +124,7 @@ pub fn data_dir() -> PathBuf {
         .map_or_else(default_data_dir, PathBuf::from)
 }
 
-/// Where a system service keeps its data on each OS. `copal install` gives this folder to the
+/// Where a system service keeps its data on each OS. `copal setup` gives this folder to the
 /// `copal` account.
 fn default_data_dir() -> PathBuf {
     if cfg!(windows) {

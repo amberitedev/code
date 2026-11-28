@@ -63,6 +63,8 @@ pub struct CoreAccess {
     pub owed: Arc<Notify>,
     /// Asks the pairing loop for a fresh code (`copal pair`).
     pub new_code: Notify,
+    /// The link to the backend, which sync holds while paired.
+    pub link: Mutex<link::Link>,
     streams: Mutex<HashMap<String, usize>>,
     sign_ins: Mutex<HashMap<IpAddr, (Instant, u32)>>,
 }
@@ -82,6 +84,7 @@ impl CoreAccess {
             changed: broadcast::channel(64).0,
             owed: Arc::new(Notify::new()),
             new_code: Notify::new(),
+            link: Mutex::default(),
             streams: Mutex::default(),
             sign_ins: Mutex::default(),
         }

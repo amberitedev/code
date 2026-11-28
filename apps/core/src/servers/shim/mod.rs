@@ -161,7 +161,7 @@ pub enum ShimError {
     #[error("the server's shim is not running: {0}")]
     Gone(#[from] io::Error),
     #[error(
-        "this server was started by another Copal version (shim protocol {0}); restart it to upgrade"
+        "this server was started by another Core version (shim protocol {0}); restart it to upgrade"
     )]
     Incompatible(u32),
     #[error("the shim sent something unreadable: {0}")]

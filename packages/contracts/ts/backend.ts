@@ -163,6 +163,7 @@ export const cores = {
 	ReportState: { method: "POST", path: "/core/state", auth: "core_key", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, StateReport, void>,
 	ReportStorage: { method: "POST", path: "/core/storage", auth: "core_key", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, StorageReport, StorageAnswer>,
 	ForgetPlayers: { method: "DELETE", path: "/core/players", auth: "core_key", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<null, null, ForgottenServer, void>,
+	LeaveAccount: { method: "DELETE", path: "/core", auth: "core_key", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<null, null, void, void>,
 	CreateServerShare: { method: "POST", path: "/core/shares", auth: "core_key", dangerous: false, untimed: false, body: "json", response: "json" } as Endpoint<null, null, NewServerShare, CreatedId>,
 	RenameServerShare: { method: "PATCH", path: "/core/shares/{id}", auth: "core_key", dangerous: false, untimed: false, body: "json", response: "empty" } as Endpoint<SharedInstanceId, null, SharedInstanceUpdate, void>,
 	DeleteServerShare: { method: "DELETE", path: "/core/shares/{id}", auth: "core_key", dangerous: false, untimed: false, body: "empty", response: "empty" } as Endpoint<SharedInstanceId, null, void, void>,

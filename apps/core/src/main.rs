@@ -69,22 +69,33 @@ fn run(Cli { json, command }: Cli) -> color_eyre::Result<bool> {
             .build()
     };
     match command {
-        Command::Install {
+        Some(Command::Setup {
             owner,
             allow_downgrade,
-        } => daemon::install::install(owner.as_deref(), allow_downgrade)
-            .map(|()| true),
-        Command::Uninstall { remove_data } => {
-            daemon::install::uninstall(remove_data).map(|()| true)
+        }) => {
+            let ui = cli::ui::Ui::new(json);
+            let done =
+                daemon::install::setup(&ui, owner.as_deref(), allow_downgrade);
+            Ok(cli::finish(&ui, json, done))
         }
-        Command::Run { service } => daemon::run(service).map(|()| true),
-        Command::Core => daemon::core().map(|()| true),
-        Command::Shim { data_dir, server } => small_runtime()?
+        Some(Command::Uninstall {
+            remove_data,
+            keep_data,
+            yes,
+        }) => {
+            let ui = cli::ui::Ui::new(json);
+            let done =
+                daemon::install::uninstall(&ui, remove_data, keep_data, yes);
+            Ok(cli::finish(&ui, json, done))
+        }
+        Some(Command::Run { service }) => daemon::run(service).map(|()| true),
+        Some(Command::Core) => daemon::core().map(|()| true),
+        Some(Command::Shim { data_dir, server }) => small_runtime()?
             .block_on(servers::shim::main(data_dir, server))
             .map(|()| true),
-        Command::Store(args) => tokio::runtime::Runtime::new()?
+        Some(Command::Store(args)) => tokio::runtime::Runtime::new()?
             .block_on(sharing_storage::main(args))
             .map(|()| true),
-        command => small_runtime()?.block_on(cli::run(command, json)),
+        command => Ok(small_runtime()?.block_on(cli::run(command, json))),
     }
 }

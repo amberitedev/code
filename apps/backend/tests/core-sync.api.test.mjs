@@ -244,6 +244,17 @@ test('state reports write only what changed', async () => {
 	})
 })
 
+test('a Core leaves its account with its own key, once', async () => {
+	await withCore('core-leave', async ({ backend, call }) => {
+		assert.equal((await call('DELETE', '/core', undefined, 'mra_owner')).status, 401)
+		assert.equal((await call('DELETE', '/core')).status, 204)
+		assert.equal(await backend.db.prepare("SELECT 1 FROM cores WHERE id = 'core'").first(), null)
+		const again = await call('DELETE', '/core')
+		assert.equal(again.status, 410)
+		assert.equal((await again.json()).error, 'core_removed')
+	})
+})
+
 test('the old Core routes are gone, and a removed Core is told so on every route it calls', async () => {
 	await withCore('core-old-routes', async ({ call }) => {
 		for (const [method, path] of [

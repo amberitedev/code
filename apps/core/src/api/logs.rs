@@ -22,13 +22,17 @@ pub async fn get(
 ) -> Result<Json<CoreLogs>, ApiError> {
     require_owner(&caller)?;
     let count = request.query.lines.unwrap_or(100).clamp(1, 1000);
-    let lines = match newest(state.servers.paths().logs()) {
-        Some(path) => console::tail(&path, count)
-            .map(|(lines, _)| lines)
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
+    let lines = tail(state.servers.paths().logs(), count);
     Ok(Json(CoreLogs { lines }))
+}
+
+/// The last `count` lines of Core's newest log in `dir`, oldest first. Empty when there is no
+/// log or this account may not read it. The CLI reads it this way when Core does not answer.
+pub fn tail(dir: PathBuf, count: usize) -> Vec<String> {
+    newest(dir)
+        .and_then(|path| console::tail(&path, count).ok())
+        .map(|(lines, _)| lines)
+        .unwrap_or_default()
 }
 
 /// Core's newest log file. Their names end in the date, so the last name is the newest.

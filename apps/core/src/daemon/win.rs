@@ -5,8 +5,8 @@ use std::{ffi::OsStr, io, os::windows::ffi::OsStrExt, path::Path, ptr};
 
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE, LUID,
-        LocalFree,
+        CloseHandle, ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS,
+        ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE, LUID, LocalFree,
     },
     Security::{
         AdjustTokenPrivileges,
@@ -24,8 +24,9 @@ use windows_sys::Win32::{
     },
     System::{
         Registry::{
-            HKEY, REG_DWORD, RRF_RT_REG_DWORD, RegDeleteKeyValueW,
-            RegGetValueW, RegSetKeyValueW,
+            HKEY, KEY_READ, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD, RegCloseKey,
+            RegDeleteKeyValueW, RegEnumValueW, RegGetValueW, RegOpenKeyExW,
+            RegSetKeyValueW,
         },
         Threading::{GetCurrentProcess, OpenProcessToken},
     },
@@ -354,4 +355,54 @@ pub fn delete_registry_value(
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         result => result,
     }
+}
+
+/// The data of every `REG_SZ` value of a registry key.
+pub fn registry_strings(key: HKEY, subkey: &str) -> io::Result<Vec<String>> {
+    let mut opened = ptr::null_mut();
+    // SAFETY: a valid key and subkey; the opened key is closed below.
+    check_code(unsafe {
+        RegOpenKeyExW(key, wide(subkey).as_ptr(), 0, KEY_READ, &raw mut opened)
+    })?;
+    let mut strings = Vec::new();
+    // The longest value name the registry allows, plus its NUL.
+    let mut name = vec![0u16; 16_384];
+    let mut data = vec![0u16; 2048];
+    let mut index = 0;
+    let result = loop {
+        let mut name_len = name.len() as u32;
+        let mut data_len = (data.len() * 2) as u32;
+        let mut kind = 0;
+        // SAFETY: both buffers are as large as the lengths passed.
+        let code = unsafe {
+            RegEnumValueW(
+                opened,
+                index,
+                name.as_mut_ptr(),
+                &raw mut name_len,
+                ptr::null(),
+                &raw mut kind,
+                data.as_mut_ptr().cast(),
+                &raw mut data_len,
+            )
+        };
+        match code {
+            ERROR_NO_MORE_ITEMS => break Ok(strings),
+            ERROR_MORE_DATA => {
+                data.resize((data_len as usize).div_ceil(2) + 1, 0);
+                continue;
+            }
+            0 if kind == REG_SZ => {
+                let units = &data[..(data_len as usize / 2)];
+                let units = units.strip_suffix(&[0]).unwrap_or(units);
+                strings.push(String::from_utf16_lossy(units));
+            }
+            0 => {}
+            code => break Err(io::Error::from_raw_os_error(code as i32)),
+        }
+        index += 1;
+    };
+    // SAFETY: opened above and closed once.
+    unsafe { RegCloseKey(opened) };
+    result
 }
