@@ -342,6 +342,18 @@ pub async fn stop(
         });
         stopped.push(now);
     }
+    let kept: Vec<String> = chosen
+        .iter()
+        .filter(|server| {
+            !stopped
+                .iter()
+                .any(|stopped: &Server| stopped.server_id == server.server_id)
+        })
+        .map(|server| super::safe(&server.name))
+        .collect();
+    if !kept.is_empty() {
+        ui.say(Mark::Info, format!("Still running: {}", kept.join(", ")));
+    }
     if ui.terminal() {
         ui.outro("Start it again with: copal start");
     }

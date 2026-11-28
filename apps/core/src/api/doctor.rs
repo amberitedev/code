@@ -429,7 +429,7 @@ fn disk(root: &Path, space: std::io::Result<(u64, u64)>) -> DoctorCheck {
         Err(error) => {
             return check(
                 "disk",
-                CheckState::Skip,
+                CheckState::Warn,
                 format!("could not read the disk: {error}"),
                 details,
                 vec![],

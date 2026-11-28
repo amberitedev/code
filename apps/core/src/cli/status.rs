@@ -80,19 +80,21 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
         ui.outro(match crashed {
             Some(server) => {
                 let name = super::safe(&server.name);
-                // Named only when the name is one plain word that no other server shares:
-                // anything else would need quoting, or pick two. The list to pick from, then.
-                let plain = name
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
-                let shared = servers
+                // Named only when `copal start` takes the name as it is: one plain word
+                // that picks this server alone. The list to pick from, otherwise.
+                let plain = name.starts_with(char::is_alphanumeric)
+                    && name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+                let lower = name.to_lowercase();
+                let picked = servers
                     .iter()
                     .filter(|other| {
-                        other.name.to_lowercase() == server.name.to_lowercase()
+                        other.server_id.starts_with(&lower)
+                            || other.name.to_lowercase() == lower
                     })
-                    .count()
-                    > 1;
-                let named = if plain && !shared {
+                    .count();
+                let named = if plain && picked == 1 {
                     format!(" {name}")
                 } else {
                     String::new()

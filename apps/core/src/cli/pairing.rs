@@ -151,6 +151,14 @@ pub async fn unpair(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
     }
     spinner.done("This Core is no longer paired");
     ui.outro("Pair it again with: copal pair");
-    let status = call::<GetPairing>(client, &(), &(), Empty).await?;
+    // It worked whatever Core says next, so what it says next cannot fail it.
+    let status = call::<GetPairing>(client, &(), &(), Empty).await.unwrap_or(
+        PairingStatus {
+            paired: false,
+            owner: None,
+            code: None,
+            expires_at: None,
+        },
+    );
     Ok(Done::ok(&status))
 }

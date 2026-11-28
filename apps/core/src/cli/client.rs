@@ -22,6 +22,12 @@ use crate::{
 #[error("{}", .0.description)]
 pub struct Refused(pub ApiError);
 
+/// Core took the connection and closed it without answering, which is how it refuses a user
+/// other than the one who set it up, root included.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct Closed(String);
+
 /// Core could not be reached over the local socket.
 #[derive(Debug, thiserror::Error)]
 #[error("Core is not running, or this account may not use it")]
@@ -124,7 +130,7 @@ impl Client {
         let response = sender
             .send_request(Request::from_parts(parts, Full::new(body)))
             .await
-            .wrap_err_with(refused_message)?;
+            .map_err(|_| Closed(refused_message()))?;
         let status = response.status();
         let content_type = response
             .headers()

@@ -79,7 +79,7 @@ impl Silent {
     fn why(&self) -> String {
         match self {
             Self::Down => "They need Core running".into(),
-            Self::Root => "Core answers only the user who set it up, so run copal doctor without sudo for these".into(),
+            Self::Root => "Core answers only the user who set it up".into(),
             Self::Other(why) => format!("Core did not answer: {why}"),
         }
     }
@@ -170,6 +170,42 @@ pub async fn run(
         }
     }
 
+    let Tally {
+        problems,
+        warnings,
+        ok,
+        skipped,
+        line,
+        needs_admin,
+    } = tally(&checks, fix, admin);
+    ui.outro(line);
+    let report = Report {
+        checks,
+        problems,
+        warnings,
+        ok,
+        skipped,
+        fixed,
+    };
+    Ok(if problems > 0 || needs_admin {
+        Done::failed(&report)
+    } else {
+        Done::ok(&report)
+    })
+}
+
+/// The counts, and the report's last line.
+struct Tally {
+    problems: usize,
+    warnings: usize,
+    ok: usize,
+    skipped: usize,
+    line: String,
+    /// `--fix` without an admin repaired nothing, and that is why the run failed.
+    needs_admin: bool,
+}
+
+fn tally(checks: &[Check], fix: bool, admin: bool) -> Tally {
     let count = |state| {
         checks
             .iter()
@@ -195,51 +231,47 @@ pub async fn run(
         totals.push(format!("{skipped} skipped"));
     }
     let totals = ui::sentence(&totals.join(", "));
-    let left: Vec<String> = self::repairs(&checks)
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect();
+    let left: Vec<String> =
+        repairs(checks).into_iter().map(|(name, _)| name).collect();
     let left = left.join(" and ");
-    // `--fix` without an admin repaired nothing, and that is why this run failed.
     let needs_admin = fix && !admin && !left.is_empty();
-    if needs_admin {
+    // A check skipped for want of rights carries how to have it made.
+    let unchecked = checks.iter().find_map(|check| {
+        (check.check.state == CheckState::Skip)
+            .then(|| check.check.fix.first())
+            .flatten()
+    });
+    // A skip is expected where something is switched off: forwarding, or the backend. One on
+    // this computer, or one Core never answered, is no clean bill.
+    let all_checked = checks.iter().all(|check| {
+        check.check.state != CheckState::Skip
+            || (!check.unanswered && check.group != Group::Computer)
+    });
+    let line = if needs_admin {
         // How is under the problem itself, where the fix always is.
-        ui.outro(format!(
+        format!(
             "{totals}. Nothing was fixed: fixing the {left} needs an admin."
-        ));
+        )
+    } else if !left.is_empty() {
+        format!(
+            "{totals}. {} the {left} with: copal doctor --fix",
+            if admin { "Fix" } else { "As an admin, fix" }
+        )
+    } else if let Some(step) = unchecked {
+        format!("{totals}. {step}")
+    } else if problems + warnings == 0 && all_checked {
+        format!("{totals}. Everything works.")
     } else {
-        // A check skipped for want of rights is no clean bill: its fix is how to have it made.
-        let unchecked = checks.iter().find_map(|check| {
-            (check.check.state == CheckState::Skip)
-                .then(|| check.check.fix.first())
-                .flatten()
-        });
-        ui.outro(if !left.is_empty() {
-            format!(
-                "{totals}. {} the {left} with: copal doctor --fix",
-                if admin { "Fix" } else { "As an admin, fix" }
-            )
-        } else if let Some(step) = unchecked {
-            format!("{totals}. {step}")
-        } else if problems + warnings == 0 {
-            format!("{totals}. Everything works.")
-        } else {
-            format!("{totals}.")
-        });
-    }
-    let report = Report {
-        checks,
+        format!("{totals}.")
+    };
+    Tally {
         problems,
         warnings,
         ok,
         skipped,
-        fixed,
-    };
-    Ok(if problems > 0 || needs_admin {
-        Done::failed(&report)
-    } else {
-        Done::ok(&report)
-    })
+        line,
+        needs_admin,
+    }
 }
 
 fn plural(count: usize, word: &str) -> String {
@@ -278,7 +310,7 @@ async fn examine(ui: &Ui, client: &Client, admin: bool) -> Vec<Check> {
     let core = core.map_err(|error| {
         if error.is::<Unreachable>() {
             Silent::Down
-        } else if cfg!(unix) && admin && !error.is::<super::client::Refused>() {
+        } else if admin && error.is::<super::client::Closed>() {
             Silent::Root
         } else {
             Silent::Other(format!("{error:#}"))
@@ -382,6 +414,13 @@ fn checks(
             vec![],
             None,
         ),
+        (Err(Silent::Other(why)), service::State::Running) => own(
+            "service",
+            CheckState::Fail,
+            format!("Core answered with an error: {why}"),
+            vec!["See why with: copal logs".into()],
+            None,
+        ),
         (Err(_), service::State::Running) => own(
             "service",
             CheckState::Fail,
@@ -447,10 +486,23 @@ fn checks(
     match core {
         Ok(doctor) => checks
             .extend(doctor.checks.into_iter().map(|check| wrap(check, None))),
-        Err(silent) => checks.extend(CORE_CHECKS.iter().map(|name| Check {
-            unanswered: true,
-            ..own(name, CheckState::Skip, silent.why(), vec![], None)
-        })),
+        Err(silent) => {
+            // Root is whom the firewall is read as, and whom Core does not answer: the rest
+            // is one more run away.
+            let fix = match silent {
+                Silent::Root => {
+                    vec![
+                        "Check the rest, without sudo, with: copal doctor"
+                            .to_owned(),
+                    ]
+                }
+                Silent::Down | Silent::Other(_) => vec![],
+            };
+            checks.extend(CORE_CHECKS.iter().map(|name| Check {
+                unanswered: true,
+                ..own(name, CheckState::Skip, silent.why(), fix.clone(), None)
+            }));
+        }
     }
     // Stable, so a group keeps the order its checks came in.
     checks.sort_by_key(|check| {
@@ -506,7 +558,7 @@ async fn started(client: &Client) -> Result<(), String> {
             .await
         {
             Ok(_) => return Ok(()),
-            Err(error) if cfg!(unix) && !error.is::<Unreachable>() => {
+            Err(error) if error.is::<super::client::Closed>() => {
                 return Ok(());
             }
             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
@@ -793,7 +845,61 @@ mod tests {
             repairs(&checks),
             [("firewall".to_owned(), Repair::OpenFirewall(16662))]
         );
-        assert!(plain(&checks, false).ends_with("without sudo for these."));
+        assert!(
+            plain(&checks, false)
+                .ends_with("Core answers only the user who set it up.")
+        );
+    }
+
+    #[test]
+    fn the_last_line_never_calls_unchecked_things_fine() {
+        let healthy = |core, rules| {
+            checks(service::State::Running, core, rules, disk(), 16662, false)
+        };
+        let line = |checks: &[Check], fix| tally(checks, fix, false).line;
+        // Everything answered, and what is switched off is expected to be skipped.
+        let all = healthy(
+            Ok(core(vec![
+                check("pairing", CheckState::Ok, "paired"),
+                check("router", CheckState::Skip, "forwarding is off"),
+            ])),
+            firewall::Rules::Open,
+        );
+        assert_eq!(line(&all, false), "4 ok, 1 skipped. Everything works.");
+        // Under sudo Core answers nothing: the rest is one more run away.
+        let root = healthy(Err(Silent::Root), firewall::Rules::Open);
+        assert_eq!(
+            line(&root, false),
+            "3 ok, 5 skipped. Check the rest, without sudo, with: copal doctor"
+        );
+        // A firewall nobody could read is not fine either.
+        let unread = healthy(
+            Ok(core(vec![])),
+            firewall::Rules::Unknown {
+                why: "only root can read the firewall".into(),
+            },
+        );
+        assert!(
+            line(&unread, false)
+                .to_lowercase()
+                .contains("check the firewall with"),
+            "{}",
+            line(&unread, false)
+        );
+        // What `--fix` can repair is named, and without an admin it says why it did not.
+        let broken = healthy(
+            Ok(core(vec![])),
+            firewall::Rules::Missing {
+                found: "no UDP rule".into(),
+            },
+        );
+        assert!(
+            line(&broken, false)
+                .ends_with("fix the firewall with: copal doctor --fix")
+        );
+        let refused = tally(&broken, true, false);
+        assert!(refused.needs_admin);
+        assert!(refused.line.ends_with("needs an admin."));
     }
 
     #[test]
