@@ -93,7 +93,7 @@ pub enum Command {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Stop a server once it has saved. Without a name, pick one from a list.
+    /// Save and stop a server. Without a name, pick one from a list.
     Stop {
         /// The server's name, or the start of its id.
         server: Option<String>,

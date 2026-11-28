@@ -65,8 +65,7 @@ pub fn count(servers: &[Server]) -> String {
 
 /// One line per server: name, state, what it runs, its port, and who is online. `drawn` is for a
 /// terminal: a heading, and a coloured dot for each state. Without it the columns are
-/// separated by tabs and end with the start of the id, which names the server on the command
-/// line.
+/// separated by tabs and end with the id, whose start names the server on the command line.
 pub fn table(servers: &[Server], drawn: bool) -> String {
     let width = |title: &str, of: fn(&Server) -> String| {
         servers
@@ -115,7 +114,7 @@ pub fn table(servers: &[Server], drawn: bool) -> String {
                 &super::safe(
                     &server.players.as_deref().unwrap_or_default().join(","),
                 ),
-                &server.server_id[..server.server_id.len().min(8)],
+                server.server_id.as_str(),
             ]
             .join("\t")
         }
@@ -139,7 +138,9 @@ fn dot(state: ServerPower) -> String {
         ServerPower::Starting | ServerPower::Stopping => ui::yellow(on),
         ServerPower::Crashed => ui::red(ui::glyph("✖", "x")),
         // The same dot, dim: a hollow one is what a list to pick from marks its rows with.
-        ServerPower::Stopped | ServerPower::Killed => ui::dim(on),
+        ServerPower::Stopped | ServerPower::Killed => {
+            ui::dim(ui::glyph("●", "-"))
+        }
     }
 }
 
@@ -190,7 +191,7 @@ pub async fn start(
     let server = call::<GetServer>(client, &id(&server), &(), Empty).await?;
     spinner.done(format!("Started {name} on port {}", server.net.game_port));
     if ui.terminal() {
-        ui.outro("Its world is still loading. Stop it with: copal stop");
+        ui.outro("Its world is still loading. Check on it with: copal status");
     }
     Ok(Done::ok(&server))
 }
@@ -307,7 +308,11 @@ pub async fn stop(
             return Err(error.wrap_err(format!("{name} did not stop")));
         }
         let now = wait_offline(client, server).await?;
-        spinner.done(format!("{name} is {}", state_name(now.power_state)));
+        spinner.done(if kill {
+            format!("Ended {name} without saving")
+        } else {
+            format!("Stopped {name}")
+        });
         stopped.push(now);
     }
     if ui.terminal() {
@@ -357,15 +362,17 @@ fn choose(
         .iter()
         .map(|server| super::safe(&server.name))
         .collect();
-    let how = format!(
-        "Name the server: copal {command} <server>{}. It can be: {}",
-        if command == "stop" {
-            ", or stop them all: copal stop --all"
-        } else {
-            ""
-        },
-        names.join(", ")
-    );
+    let how = if command == "stop" {
+        format!(
+            "Name the server: copal stop <server>, or stop them all: copal stop --all. Running: {}",
+            names.join(", ")
+        )
+    } else {
+        format!(
+            "Name the server: copal start <server>. Stopped: {}",
+            names.join(", ")
+        )
+    };
     let index = ui.select(question, &items, &how)?;
     Ok(servers
         .into_iter()
@@ -496,8 +503,8 @@ pub mod tests {
         ];
         assert_eq!(
             table(&servers, false),
-            "Survival\trunning\t1.21.1\t25565\tSteve,Alex\ta1b2c3d4\n\
-             Mini\tstopped\tnot set up\t25565\t\tffff0000"
+            "Survival\trunning\t1.21.1\t25565\tSteve,Alex\ta1b2c3d4-0000-4000-8000-000000000001\n\
+             Mini\tstopped\tnot set up\t25565\t\tffff0000-0000-4000-8000-000000000002"
         );
         assert_eq!(count(&servers), "2 servers, 1 running");
     }

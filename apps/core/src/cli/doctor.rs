@@ -182,14 +182,10 @@ pub async fn run(
     // `--fix` without an admin repaired nothing, and that is why this run failed.
     let needs_admin = fix && !admin && !left.is_empty();
     if needs_admin {
-        ui.say(
-            Mark::Problem,
-            format!(
-                "Fixing {left} needs an admin. {}",
-                as_admin("Run it again", "copal doctor --fix")
-            ),
-        );
-        ui.outro(format!("{totals}."));
+        // How is under the problem itself, where the fix always is.
+        ui.outro(format!(
+            "{totals}. Nothing was fixed: fixing {left} needs an admin."
+        ));
     } else {
         ui.outro(if !left.is_empty() {
             format!(
@@ -338,7 +334,7 @@ fn checks(
         (Err(_), service::State::NotRegistered) => own(
             "service",
             CheckState::Fail,
-            "Core is not set up on this computer".into(),
+            "Core is not set up on this computer yet".into(),
             vec![set_up],
             None,
         ),

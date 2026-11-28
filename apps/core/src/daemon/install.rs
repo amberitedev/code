@@ -114,7 +114,7 @@ pub fn setup(
     allow_downgrade: bool,
 ) -> Result<Done> {
     ui.intro("copal setup");
-    require_admin()?;
+    require_admin("copal setup")?;
     refuse_data_dir_override("setup")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
@@ -213,7 +213,7 @@ pub fn uninstall(
     yes: bool,
 ) -> Result<Done> {
     ui.intro("copal uninstall");
-    require_admin()?;
+    require_admin("copal uninstall")?;
     refuse_data_dir_override("uninstall")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
@@ -389,15 +389,12 @@ pub fn as_admin(step: &str, command: &str) -> String {
     }
 }
 
-fn require_admin() -> Result<()> {
+/// Refuse without admin rights, saying how to run `command` with them.
+fn require_admin(command: &str) -> Result<()> {
     if !is_admin() {
         return Err(crate::cli::client::Stuck {
             what: "This needs an admin.".into(),
-            next: if cfg!(windows) {
-                format!("{ADMIN_TERMINAL}, run it again.")
-            } else {
-                "Run it again with sudo.".into()
-            },
+            next: as_admin("Run it again with", command),
         }
         .into());
     }

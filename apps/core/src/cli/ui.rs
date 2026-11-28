@@ -112,16 +112,17 @@ impl Ui {
         }
     }
 
-    /// Close the frame on an error: what is wrong, then the next step where every command puts
-    /// its next step. False when no frame is open, so the caller prints it.
+    /// Close the frame on an error. With a next step, what is wrong and then the step, where
+    /// every command puts its next step; without one, the error is the frame's last line. False
+    /// when no frame is open, so the caller prints it.
     pub fn abort(&self, error: impl Display, next: Option<&str>) -> bool {
         if !self.open.replace(false) {
             return false;
         }
-        let _ = cliclack::log::error(wrapped(error));
         let _ = match next {
-            Some(next) => cliclack::outro(under_the_corner(next)),
-            None => cliclack::outro_cancel(""),
+            Some(next) => cliclack::log::error(wrapped(error))
+                .and_then(|()| cliclack::outro(under_the_corner(next))),
+            None => cliclack::outro_cancel(under_the_corner(error)),
         };
         true
     }
@@ -306,8 +307,10 @@ pub fn sentence(text: &str) -> String {
     }
 }
 
-/// `text` with every command it names standing out: `copal`, its subcommand, and the flags
-/// that follow. A next step is the thing to find on a screen.
+/// `text` with every command it names standing out, since a next step is the thing to find on
+/// a screen. A step is worded `... with: <command>`, so what follows `with: ` is one, whatever
+/// program it runs; elsewhere it is `copal` with its subcommand and flags. Each word is
+/// coloured by itself, so a command that is folded over two lines colours nothing between.
 fn commands(text: &str) -> String {
     const NAMES: [&str; 12] = [
         "status",
@@ -323,27 +326,36 @@ fn commands(text: &str) -> String {
         "uninstall",
         "setup",
     ];
+    let coloured = |command: &str| -> String {
+        command.split(' ').map(cyan).collect::<Vec<_>>().join(" ")
+    };
     let bare = |word: &str| -> String {
         word.trim_end_matches(['.', ',', ':', ')']).to_owned()
     };
-    let mut out = Vec::new();
-    for line in text.split('\n') {
+    let line = |line: &str| -> String {
+        if let Some((before, after)) = line.split_once("with: ") {
+            // Up to what is said about the command, such as that it needs an admin.
+            let (command, rest) = match after.split_once(" (") {
+                Some((command, rest)) => (command, format!(" ({rest}")),
+                None => (after, String::new()),
+            };
+            return format!("{before}with: {}{rest}", coloured(command));
+        }
         let mut words: Vec<String> =
             line.split(' ').map(str::to_owned).collect();
         let mut index = 0;
         while index < words.len() {
-            if words[index] != "copal" {
+            let named = words[index] == "copal"
+                && words.get(index + 1).is_some_and(|next| {
+                    NAMES.contains(&bare(next).as_str())
+                        || next.starts_with("--")
+                });
+            if !named {
                 index += 1;
                 continue;
             }
-            // `copal`, then a subcommand, then any flags.
-            let mut end = index;
-            if words
-                .get(index + 1)
-                .is_some_and(|next| NAMES.contains(&bare(next).as_str()))
-            {
-                end += 1;
-            }
+            // The subcommand, when there is one, then any flags.
+            let mut end = index + 1;
             while words
                 .get(end + 1)
                 .is_some_and(|next| next.starts_with("--"))
@@ -352,13 +364,16 @@ fn commands(text: &str) -> String {
             }
             let last = bare(&words[end]);
             let after = words[end][last.len()..].to_owned();
-            let named = [&words[index..end], &[last]].concat().join(" ");
-            words.splice(index..=end, [format!("{}{after}", cyan(named))]);
+            let command = [&words[index..end], &[last]].concat().join(" ");
+            words.splice(
+                index..=end,
+                [format!("{}{after}", coloured(&command))],
+            );
             index += 1;
         }
-        out.push(words.join(" "));
-    }
-    out.join("\n")
+        words.join(" ")
+    };
+    text.split('\n').map(line).collect::<Vec<_>>().join("\n")
 }
 
 fn fold(line: &str, width: usize) -> String {

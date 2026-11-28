@@ -332,7 +332,7 @@ async fn servers_are_listed_started_and_stopped_by_name() {
         .unwrap();
     assert!(
         error.to_string().contains("copal start <server>")
-            && error.to_string().contains("Survival"),
+            && error.to_string().contains("Stopped: Survival"),
         "{error}"
     );
     // No server starts before the EULA is accepted, and the flag that accepts it is named.
