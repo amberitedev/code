@@ -346,17 +346,6 @@ async function copyToClipboard(text) {
 	</ModalWrapper>
 </template>
 
-<style>
-.light-mode {
-	--color-orange-bg: rgba(255, 163, 71, 0.2);
-}
-
-.dark-mode,
-.oled-mode {
-	--color-orange-bg: rgba(224, 131, 37, 0.2);
-}
-</style>
-
 <style scoped lang="scss">
 .cta-button {
 	display: flex;
