@@ -20,7 +20,7 @@ use super::{
 
 /// `copal list`.
 pub async fn list(ui: &Ui, client: &Client) -> Result<Done> {
-    ui.intro("copal list");
+    ui.begin();
     let servers = all(client).await?;
     if servers.is_empty() {
         // Piped, the output is one row per server: no servers, no rows.
@@ -155,7 +155,7 @@ pub async fn start(
     server: Option<String>,
     accept_eula: bool,
 ) -> Result<Done> {
-    ui.intro("copal start");
+    ui.begin();
     let servers = all(client).await?;
     if servers.is_empty() {
         ui.outro(NO_SERVERS);
@@ -251,7 +251,7 @@ pub async fn stop(
     kill: bool,
     yes: bool,
 ) -> Result<Done> {
-    ui.intro("copal stop");
+    ui.begin();
     let servers = all(client).await?;
     let running = |servers: Vec<Server>| -> Vec<Server> {
         servers

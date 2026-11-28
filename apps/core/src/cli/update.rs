@@ -53,7 +53,7 @@ pub struct UpdateArgs {
 
 /// `copal update`.
 pub async fn run(ui: &Ui, client: &Client, args: UpdateArgs) -> Result<Done> {
-    ui.intro("copal update");
+    ui.begin();
     if args.channel.is_some() || args.auto.is_some() {
         let change = UpdateSettings {
             channel: args.channel,

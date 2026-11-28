@@ -50,7 +50,7 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
     // The commands first, so the last thing on the screen is where this Core is and the next
     // step.
     ui.help(<super::Cli as clap::CommandFactory>::command().render_help());
-    ui.intro("copal");
+    ui.begin();
     let found = look(client).await;
     if !found.fine.is_empty() {
         ui.say(Mark::Done, found.fine.join("\n"));

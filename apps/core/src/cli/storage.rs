@@ -27,7 +27,7 @@ struct Part {
 
 /// `copal storage`.
 pub async fn run(ui: &Ui, client: &Client, all: bool) -> Result<Done> {
-    ui.intro("copal storage");
+    ui.begin();
     let spinner = ui.spinner("Measuring what is on the disk");
     let usage = match call::<GetDiskUsage>(client, &(), &(), Empty).await {
         Ok(usage) => usage,

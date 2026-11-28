@@ -113,7 +113,7 @@ pub fn setup(
     owner: Option<&str>,
     allow_downgrade: bool,
 ) -> Result<Done> {
-    ui.intro("copal setup");
+    ui.begin();
     require_admin("copal setup")?;
     refuse_data_dir_override("setup")?;
     let config = Config::load()?;
@@ -220,7 +220,7 @@ pub fn uninstall(
     keep_data: bool,
     yes: bool,
 ) -> Result<Done> {
-    ui.intro("copal uninstall");
+    ui.begin();
     require_admin("copal uninstall")?;
     refuse_data_dir_override("uninstall")?;
     let config = Config::load()?;

@@ -141,7 +141,7 @@ pub async fn run(
     fix: bool,
     verbose: bool,
 ) -> Result<Done> {
-    ui.intro("copal doctor");
+    ui.begin();
     let admin = install::is_admin();
     let mut checks = examine(ui, client, admin).await;
     let mut fixed = Vec::new();

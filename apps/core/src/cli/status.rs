@@ -30,7 +30,7 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
         pairing: PairingStatus,
         servers: Vec<contracts::core::Server>,
     }
-    ui.intro("copal status");
+    ui.begin();
     let health = call::<CheckHealth>(client, &(), &(), Empty).await?;
     let update = call::<GetUpdate>(client, &(), &(), Empty).await?;
     let machine = call::<GetMachine>(client, &(), &(), Empty).await?;
@@ -154,7 +154,7 @@ pub async fn logs(ui: &Ui, client: &Client, lines: usize) -> Result<Done> {
                 return Err(error);
             }
             if lines.is_empty() {
-                ui.intro("copal logs");
+                ui.begin();
                 let mut stuck = super::client::why_unreachable();
                 // Where Core was set up there is a log, which only an admin may read: someone
                 // who is not one is told how. An admin who got nothing has no log to read.

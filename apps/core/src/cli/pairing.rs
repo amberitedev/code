@@ -19,7 +19,7 @@ use crate::access::pairing::instructions;
 /// `copal pair`: show the code, then wait until it is approved in the App. Outside a terminal,
 /// and with `no_wait`, it shows the code and leaves: `copal status` says when it is approved.
 pub async fn pair(ui: &Ui, client: &Client, no_wait: bool) -> Result<Done> {
-    ui.intro("copal pair");
+    ui.begin();
     let mut status = call::<GetPairing>(client, &(), &(), Empty).await?;
     if status.paired {
         ui.say(Mark::Done, paired_with(&status));
@@ -137,7 +137,7 @@ async fn approved_or_replaced(
 
 /// `copal unpair`.
 pub async fn unpair(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
-    ui.intro("copal unpair");
+    ui.begin();
     let status = call::<GetPairing>(client, &(), &(), Empty).await?;
     if !status.paired {
         ui.outro("This Core is not paired. Pair it with: copal pair");

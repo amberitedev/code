@@ -18,7 +18,7 @@ enum Mode {
 
 pub struct Ui {
     mode: Mode,
-    /// A frame is open: `intro` drew its top and nothing closed it yet.
+    /// A command began drawing and nothing closed its frame yet.
     open: Cell<bool>,
 }
 
@@ -75,11 +75,9 @@ impl Ui {
         }
     }
 
-    /// The top of a command's frame, naming the command.
-    pub fn intro(&self, command: &str) {
+    /// A command's output begins: from here an error closes the frame it is drawn in.
+    pub fn begin(&self) {
         if self.terminal() {
-            let _ =
-                cliclack::intro(Tone::Accent.style().bold().apply_to(command));
             self.open.set(true);
         }
     }
@@ -570,15 +568,6 @@ impl cliclack::Theme for Amber {
 
     fn submit_symbol(&self) -> String {
         paint(glyph("◇", "o"), Tone::Accent)
-    }
-
-    fn format_intro(&self, title: &str) -> String {
-        let rail = self.bar_color(&ThemeState::Submit);
-        format!(
-            "{}  {title}\n{}\n",
-            rail.apply_to(glyph("╭", "T")),
-            rail.apply_to(glyph("│", "|")),
-        )
     }
 
     fn format_outro(&self, message: &str) -> String {
