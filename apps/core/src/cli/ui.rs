@@ -326,8 +326,16 @@ fn commands(text: &str) -> String {
         "uninstall",
         "setup",
     ];
+    // The comma between two commands belongs to neither.
     let coloured = |command: &str| -> String {
-        command.split(' ').map(cyan).collect::<Vec<_>>().join(" ")
+        command
+            .split(' ')
+            .map(|word| match word.strip_suffix(',') {
+                Some(word) => format!("{},", cyan(word)),
+                None => cyan(word),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     };
     let bare = |word: &str| -> String {
         word.trim_end_matches(['.', ',', ':', ')']).to_owned()

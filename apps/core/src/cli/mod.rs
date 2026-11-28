@@ -82,7 +82,7 @@ pub enum Command {
     },
     /// List the servers on this Core.
     #[command(
-        after_help = "Piped, each server is one line of tab-separated columns: name, state, what it runs, port, who is online, id."
+        after_help = "Piped, each server is one line of tab-separated columns: name, state, what it runs, port, who is online (empty when nobody is), id."
     )]
     List,
     /// Start a server. Without a name, pick one from a list.

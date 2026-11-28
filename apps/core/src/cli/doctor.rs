@@ -64,6 +64,27 @@ impl Group {
     }
 }
 
+/// Why Core's own checks are missing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Silent {
+    /// Nothing answers on the local socket.
+    Down,
+    /// Core answers only the user who set it up, and this is root: `sudo copal doctor`, which
+    /// is how the firewall is read and repaired on Linux.
+    Root,
+    Other(String),
+}
+
+impl Silent {
+    fn why(&self) -> String {
+        match self {
+            Self::Down => "They need Core running".into(),
+            Self::Root => "Core answers only the user who set it up, so run copal doctor without sudo for these".into(),
+            Self::Other(why) => format!("Core did not answer: {why}"),
+        }
+    }
+}
+
 /// Something `--fix` can do. Both take an admin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Repair {
@@ -184,15 +205,23 @@ pub async fn run(
     if needs_admin {
         // How is under the problem itself, where the fix always is.
         ui.outro(format!(
-            "{totals}. Nothing was fixed: fixing {left} needs an admin."
+            "{totals}. Nothing was fixed: fixing the {left} needs an admin."
         ));
     } else {
+        // A check skipped for want of rights is no clean bill: its fix is how to have it made.
+        let unchecked = checks.iter().find_map(|check| {
+            (check.check.state == CheckState::Skip)
+                .then(|| check.check.fix.first())
+                .flatten()
+        });
         ui.outro(if !left.is_empty() {
             format!(
-                "{totals}. Fix {left} with: copal doctor --fix{}",
-                if admin { "" } else { " (needs an admin)" }
+                "{totals}. {} the {left} with: copal doctor --fix",
+                if admin { "Fix" } else { "As an admin, fix" }
             )
-        } else if problems + warnings == 0 {
+        } else if let Some(step) = unchecked {
+            format!("{totals}. {step}")
+        } else if problems + warnings + skipped == 0 {
             format!("{totals}. Everything works.")
         } else {
             format!("{totals}.")
@@ -248,11 +277,11 @@ async fn examine(ui: &Ui, client: &Client, admin: bool) -> Vec<Check> {
     progress.step();
     let core = core.map_err(|error| {
         if error.is::<Unreachable>() {
-            "They need Core running".to_owned()
+            Silent::Down
         } else if cfg!(unix) && admin {
-            "Core answers only the user who set it up, so run copal doctor without sudo for these".to_owned()
+            Silent::Root
         } else {
-            format!("Core did not answer: {error:#}")
+            Silent::Other(format!("{error:#}"))
         }
     });
     progress.clear();
@@ -262,7 +291,7 @@ async fn examine(ui: &Ui, client: &Client, admin: bool) -> Vec<Check> {
 /// Every check in the order it is shown, from what was found.
 fn checks(
     service: service::State,
-    core: Result<Doctor, String>,
+    core: Result<Doctor, Silent>,
     rules: firewall::Rules,
     disk: DoctorCheck,
     port: u16,
@@ -345,6 +374,14 @@ fn checks(
             vec![fix_with("Start")],
             Some(Repair::StartService),
         ),
+        // Root cannot ask Core, but the service manager says it runs.
+        (Err(Silent::Root), service::State::Running) => own(
+            "service",
+            CheckState::Ok,
+            "running, and starts with this computer".into(),
+            vec![],
+            None,
+        ),
         (Err(_), service::State::Running) => own(
             "service",
             CheckState::Fail,
@@ -388,9 +425,14 @@ fn checks(
             vec![fix_with("Open")],
             Some(Repair::OpenFirewall(port)),
         ),
-        firewall::Rules::Unknown { why } => {
-            own("firewall", CheckState::Skip, why, vec![], None)
-        }
+        // Not a problem, and not a clean bill either: its fix is how to have it checked.
+        firewall::Rules::Unknown { why } => own(
+            "firewall",
+            CheckState::Skip,
+            why,
+            vec![as_admin("Check it with", "copal doctor")],
+            None,
+        ),
     };
     firewall_check.check.details = vec![CheckDetail {
         label: "Core needs".into(),
@@ -400,9 +442,9 @@ fn checks(
     match core {
         Ok(doctor) => checks
             .extend(doctor.checks.into_iter().map(|check| wrap(check, None))),
-        Err(why) => checks.extend(CORE_CHECKS.iter().map(|name| Check {
+        Err(silent) => checks.extend(CORE_CHECKS.iter().map(|name| Check {
             unanswered: true,
-            ..own(name, CheckState::Skip, why.clone(), vec![], None)
+            ..own(name, CheckState::Skip, silent.why(), vec![], None)
         })),
     }
     // Stable, so a group keeps the order its checks came in.
@@ -431,7 +473,7 @@ async fn apply(
         let spinner = ui.spinner(repair.label());
         let result = match *repair {
             Repair::StartService => match service::start() {
-                Ok(()) => answers(client).await,
+                Ok(()) => started(client).await,
                 Err(error) => Err(format!("{error:#}")),
             },
             Repair::OpenFirewall(port) => firewall::open(port)
@@ -451,10 +493,13 @@ async fn apply(
     fixed
 }
 
-/// Wait for a Core that was just started to answer.
-async fn answers(client: &Client) -> Result<(), String> {
+/// Wait for a Core that was just started to answer. On Linux and macOS this runs as root,
+/// whom Core does not answer, so there the service manager's word is taken.
+async fn started(client: &Client) -> Result<(), String> {
     for _ in 0..30 {
-        if client.is_up().await {
+        if client.is_up().await
+            || (cfg!(unix) && service::state() == service::State::Running)
+        {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -699,7 +744,7 @@ mod tests {
     fn a_stopped_core_is_one_problem_and_what_it_left_out_is_said_once() {
         let checks = checks(
             service::State::Stopped,
-            Err("They need Core running".into()),
+            Err(Silent::Down),
             firewall::Rules::Open,
             disk(),
             16662,
@@ -718,6 +763,29 @@ mod tests {
             "ok   disk: plenty\n\
              Skipped: java, pairing, backend, router, ports. They need Core running."
         ));
+    }
+
+    /// `sudo copal doctor` is how the firewall is read on Linux, and Core does not answer
+    /// root: that is not the service failing.
+    #[test]
+    fn under_sudo_a_running_service_is_fine_and_the_firewall_is_what_gets_checked()
+     {
+        let checks = checks(
+            service::State::Running,
+            Err(Silent::Root),
+            firewall::Rules::Missing {
+                found: "ufw allows TCP but not UDP 16662".into(),
+            },
+            disk(),
+            16662,
+            true,
+        );
+        assert_eq!(checks[0].check.state, CheckState::Ok);
+        assert_eq!(
+            repairs(&checks),
+            [("firewall".to_owned(), Repair::OpenFirewall(16662))]
+        );
+        assert!(plain(&checks, false).ends_with("without sudo for these."));
     }
 
     #[test]

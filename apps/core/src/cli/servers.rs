@@ -188,7 +188,14 @@ pub async fn start(
         spinner.clear();
         return Err(error.wrap_err(format!("{name} did not start")));
     }
-    let server = call::<GetServer>(client, &id(&server), &(), Empty).await?;
+    let server = match call::<GetServer>(client, &id(&server), &(), Empty).await
+    {
+        Ok(server) => server,
+        Err(error) => {
+            spinner.clear();
+            return Err(error);
+        }
+    };
     spinner.done(format!("Started {name} on port {}", server.net.game_port));
     if ui.terminal() {
         ui.outro("Its world is still loading. Check on it with: copal status");
@@ -307,7 +314,13 @@ pub async fn stop(
             spinner.clear();
             return Err(error.wrap_err(format!("{name} did not stop")));
         }
-        let now = wait_offline(client, server).await?;
+        let now = match wait_offline(client, server).await {
+            Ok(now) => now,
+            Err(error) => {
+                spinner.clear();
+                return Err(error);
+            }
+        };
         spinner.done(if kill {
             format!("Ended {name} without saving")
         } else {

@@ -78,10 +78,18 @@ pub async fn run(ui: &Ui, client: &Client) -> Result<Done> {
             server.power_state == contracts::core::ServerPower::Crashed
         });
         ui.outro(match crashed {
-            Some(server) => format!(
-                "{} crashed. See why in Amberite, or start it again with: copal start",
-                super::safe(&server.name)
-            ),
+            Some(server) => {
+                let name = super::safe(&server.name);
+                // A name with a space in it would need quoting: the list to pick from, then.
+                let named = if name.contains(char::is_whitespace) {
+                    String::new()
+                } else {
+                    format!(" {name}")
+                };
+                format!(
+                    "{name} crashed. See why in Amberite, or start it again with: copal start{named}"
+                )
+            }
             None => "Something not working? Find out with: copal doctor"
                 .to_owned(),
         });
@@ -121,9 +129,13 @@ pub async fn logs(ui: &Ui, client: &Client, lines: usize) -> Result<Done> {
     let query = LogsQuery { lines: Some(lines) };
     let logs = match call::<GetLogs>(client, &(), &query, Empty).await {
         Ok(logs) => logs,
-        Err(error) if error.is::<Unreachable>() => {
+        // Core is down, or refuses this user (root, under sudo): the file itself, then.
+        Err(error) if !error.is::<super::client::Refused>() => {
             let folder = Paths::new(config::data_dir()).logs();
             let lines = crate::api::logs::tail(folder, lines.clamp(1, 1000));
+            if lines.is_empty() && !error.is::<Unreachable>() {
+                return Err(error);
+            }
             if lines.is_empty() {
                 ui.intro("copal logs");
                 let mut stuck = super::client::why_unreachable();

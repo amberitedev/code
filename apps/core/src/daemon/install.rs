@@ -122,6 +122,12 @@ pub fn setup(
         && InstallRecord::load(&paths)?.is_some()
     {
         ui.say(Mark::Done, "Core is already set up on this computer.");
+        if owner.is_some() {
+            ui.say(
+                Mark::Warning,
+                "--owner was not applied: the owner is chosen when Core is first set up.",
+            );
+        }
         ui.outro("Check it, and repair what is wrong, with: copal doctor");
         return Ok(Done::ok(&serde_json::json!({ "set_up": false })));
     }
@@ -220,7 +226,7 @@ pub fn uninstall(
     let record = InstallRecord::load(&paths)?;
     let folder = paths.root().display().to_string();
 
-    let remove_data = if remove_data || keep_data || !ui.terminal() {
+    let remove_data = if remove_data || keep_data || yes || !ui.terminal() {
         remove_data
     } else {
         ui.select(
@@ -292,15 +298,24 @@ pub fn uninstall(
     );
 
     if remove_data {
+        // The key that takes this Core off its account goes with the folder: use it first.
+        let left = left_account(&paths, config.backend_url.as_deref());
         if paths.root().exists() {
             std::fs::remove_dir_all(paths.root())
                 .wrap_err_with(|| format!("could not remove {folder}"))?;
         }
         ui.say(Mark::Done, format!("Data folder: removed {folder}"));
-        ui.say(
-            Mark::Info,
-            "If this Core was paired, also remove it in Amberite under Settings, Cores.",
-        );
+        match left {
+            Some(true) => ui.say(
+                Mark::Done,
+                "Amberite: this Core was removed from its account",
+            ),
+            Some(false) => ui.say(
+                Mark::Warning,
+                "Amberite could not be told. Remove this Core there too, under Settings, Cores.",
+            ),
+            None => {}
+        }
     } else {
         ui.say(
             Mark::Info,
@@ -314,6 +329,25 @@ pub fn uninstall(
         "uninstalled": true,
         "data_removed": remove_data,
     })))
+}
+
+/// Take the Core on this data folder off its account, before the folder goes. `None` when it
+/// is not paired or has no database, `Some(false)` when the backend could not be told.
+fn left_account(paths: &Paths, backend_url: Option<&str>) -> Option<bool> {
+    let database = paths.database();
+    if !database.exists() {
+        return None;
+    }
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    runtime.block_on(async {
+        let db = crate::db::open(&database).await.ok()?;
+        let left = crate::api::pairing::leave(&db, backend_url).await;
+        db.close().await;
+        left
+    })
 }
 
 /// Refuse to install a binary older than the version Core updated itself to: that version may

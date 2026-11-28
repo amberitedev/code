@@ -37,12 +37,7 @@ pub async fn get(
 ) -> Result<Json<Doctor>, ApiError> {
     require_owner(&caller)?;
     let paired = pairing::paired(&state.db).await.map_err(internal)?;
-    let owner: Option<String> = sqlx::query_scalar(
-        "SELECT users.name FROM core JOIN users ON users.id = core.owner_user_id WHERE core.id = 1",
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(internal)?;
+    let owner = super::pairing::owner(&state.db).await?;
     let backend_url = state.storage.backend_url();
     let (backend, checked) = tokio::join!(
         backend(&state, backend_url, paired),
@@ -421,7 +416,9 @@ fn java_installed(installed: Vec<(u32, String)>) -> DoctorCheck {
 /// Free space on the disk that holds `root`, the data folder. The CLI checks it, so it is
 /// checked while Core is down too: a full disk is one reason a Core does not start.
 pub fn disk_check(root: &Path) -> DoctorCheck {
-    disk(root, super::disk::space(root))
+    // Through its parts, so the path is shown with this OS's own separators.
+    let shown: std::path::PathBuf = root.components().collect();
+    disk(&shown, super::disk::space(root))
 }
 
 /// `space` is the disk's total and free bytes.

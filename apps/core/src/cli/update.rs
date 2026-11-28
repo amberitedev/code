@@ -21,6 +21,10 @@ use super::{
 };
 use crate::update::{launcher, versions::describe_failure};
 
+/// What cannot go with a change of settings, which installs nothing.
+const SETTINGS_ONLY: [&str; 5] =
+    ["check", "yes", "rollback", "retry", "allow_downgrade"];
+
 #[derive(Debug, clap::Args)]
 pub struct UpdateArgs {
     /// Only look for a newer release, without installing it.
@@ -30,10 +34,10 @@ pub struct UpdateArgs {
     #[arg(short, long)]
     pub yes: bool,
     /// Change the release channel. Changes the setting and installs nothing.
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = SETTINGS_ONLY)]
     pub channel: Option<Channel>,
     /// Turn automatic updates on or off. Changes the setting and installs nothing.
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = SETTINGS_ONLY)]
     pub auto: Option<Switch>,
     /// Go back to the version before the last update, with the database from before it.
     /// Changes made since the update are lost.
@@ -130,7 +134,7 @@ pub async fn run(ui: &Ui, client: &Client, args: UpdateArgs) -> Result<Done> {
             }
         };
     spinner.message(format!("Restarting into Core {}", restarting.version));
-    Ok(restarted(ui, client, spinner, restarting.version).await)
+    Ok(restarted(ui, client, spinner, restarting.version, "Updated").await)
 }
 
 /// `copal update --rollback`.
@@ -166,7 +170,7 @@ async fn roll_back(ui: &Ui, client: &Client, yes: bool) -> Result<Done> {
             return Err(error.wrap_err("Core did not go back"));
         }
     };
-    Ok(restarted(ui, client, spinner, restarting.version).await)
+    Ok(restarted(ui, client, spinner, restarting.version, "Went back").await)
 }
 
 /// `Channel: stable. Automatic updates: on.`
@@ -237,6 +241,7 @@ async fn restarted(
     client: &Client,
     spinner: super::ui::Spinner,
     requested: String,
+    done: &str,
 ) -> Done {
     let running = wait_for(client, &requested).await;
     let outcome = match &running {
@@ -257,7 +262,7 @@ async fn restarted(
     match (outcome, &running) {
         (RestartOutcome::Running, _) => {
             spinner.done(format!("Core {requested} is running"));
-            ui.outro("Updated. Servers kept running.");
+            ui.outro(format!("{done}. Servers kept running."));
         }
         (RestartOutcome::WentBack, Some(running)) => {
             spinner.failed(format!(
@@ -291,11 +296,14 @@ async fn wait_for(client: &Client, version: &str) -> Option<String> {
     let checks = launcher::HEALTH_TIMEOUT.as_secs() + 30;
     for _ in 0..checks {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        if let Ok(health) = call::<CheckHealth>(client, &(), &(), Empty).await {
-            if health.version == version {
-                return Some(health.version);
-            }
-            seen = Some(health.version);
+        // What answers now, not what answered once: a version that answered and then died
+        // did not take over.
+        seen = call::<CheckHealth>(client, &(), &(), Empty)
+            .await
+            .ok()
+            .map(|health| health.version);
+        if seen.as_deref() == Some(version) {
+            return seen;
         }
     }
     seen

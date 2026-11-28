@@ -176,7 +176,10 @@ fn ufw_allowed(status: &str) -> Option<Allowed> {
         let (Some(to), Some(action)) = (words.next(), words.next()) else {
             continue;
         };
-        if !action.starts_with("ALLOW") {
+        // `ALLOW` and `ALLOW IN` let traffic in; `ALLOW OUT` and `ALLOW FWD` do not.
+        if !action.starts_with("ALLOW")
+            || matches!(words.next(), Some("OUT" | "FWD"))
+        {
             continue;
         }
         let (ports, protocol) = to.split_once('/').unwrap_or((to, ""));
@@ -537,6 +540,14 @@ mod tests {
         let status = "Status: active\n\nTo                         Action      From\n--                         ------      ----\n16662/tcp                  ALLOW       Anywhere                   # Copal\n25565:25664/tcp            ALLOW       Anywhere\n16662/tcp (v6)             ALLOW       Anywhere (v6)\n";
         assert_eq!(
             ufw_allowed(status).unwrap().missing(16662),
+            vec!["UDP 16662".to_string()]
+        );
+        // A rule that lets traffic out lets nothing in.
+        let out = format!(
+            "{status}16662/udp                  ALLOW OUT   Anywhere\n"
+        );
+        assert_eq!(
+            ufw_allowed(&out).unwrap().missing(16662),
             vec!["UDP 16662".to_string()]
         );
         // A rule with no protocol allows both.

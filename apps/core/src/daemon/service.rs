@@ -471,12 +471,24 @@ mod platform {
     }
 
     pub fn start() -> Result<()> {
-        let output = Command::new("launchctl")
-            .args(["bootstrap", "system", PLIST])
-            .output()?;
+        // A daemon launchd still has loaded is started again in place: bootstrapping it twice
+        // fails.
+        let target = format!("system/{LABEL}");
+        let loaded = Command::new("launchctl")
+            .args(["print", &target])
+            .output()?
+            .status
+            .success();
+        let args: &[&str] = if loaded {
+            &["kickstart", "-k", &target]
+        } else {
+            &["bootstrap", "system", PLIST]
+        };
+        let output = Command::new("launchctl").args(args).output()?;
         if !output.status.success() {
             color_eyre::eyre::bail!(
-                "launchctl bootstrap failed: {}",
+                "launchctl {} failed: {}",
+                args[0],
                 String::from_utf8_lossy(&output.stderr).trim()
             );
         }

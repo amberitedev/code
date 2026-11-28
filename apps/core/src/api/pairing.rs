@@ -28,6 +28,16 @@ const NEW_CODE_WAIT: Duration = Duration::from_secs(20);
 /// How long `DELETE /pairing` from the CLI waits for the backend.
 const LEAVE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The owner's name, while the Core has one.
+pub async fn owner(db: &SqlitePool) -> Result<Option<String>, ApiError> {
+    sqlx::query_scalar(
+        "SELECT u.name FROM core c JOIN users u ON u.id = c.owner_user_id WHERE c.id = 1",
+    )
+    .fetch_optional(db)
+    .await
+    .map_err(internal)
+}
+
 async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
     let paired = pairing::paired(db).await.map_err(internal)?;
     let shown = if paired {
@@ -35,16 +45,7 @@ async fn status(db: &SqlitePool) -> Result<PairingStatus, ApiError> {
     } else {
         pairing::shown(db).await.map_err(internal)?
     };
-    let owner = if paired {
-        sqlx::query_scalar(
-            "SELECT u.name FROM core c JOIN users u ON u.id = c.owner_user_id WHERE c.id = 1",
-        )
-        .fetch_optional(db)
-        .await
-        .map_err(internal)?
-    } else {
-        None
-    };
+    let owner = if paired { owner(db).await? } else { None };
     Ok(PairingStatus {
         paired,
         owner,
@@ -122,20 +123,29 @@ pub async fn remove(
 /// Take this Core off its account on the backend, with its own key. A backend that no longer knows
 /// it is as good as done.
 async fn leave_account(state: &CoreState) -> Result<(), ApiError> {
-    let Some(base) = state.storage.backend_url() else {
-        return Ok(());
-    };
-    let key: Option<String> = sqlx::query_scalar(
+    match leave(&state.db, state.storage.backend_url()).await {
+        Some(false) => Err(ApiError::new(
+            ErrorCode::InternalError,
+            "Core could not reach Amberite to leave the account. Check the internet connection and try again, or remove this Core in Amberite under Settings, Cores.",
+        )),
+        Some(true) | None => Ok(()),
+    }
+}
+
+/// Whether the backend took the Core in `db` off its account. `None` when there is nothing to
+/// leave: no backend, or not paired. `copal uninstall` calls this too, before it deletes the
+/// key with the data folder.
+pub async fn leave(db: &SqlitePool, backend_url: Option<&str>) -> Option<bool> {
+    let base = backend_url?;
+    let key: String = sqlx::query_scalar(
         "SELECT backend_key FROM core WHERE id = 1 AND owner_user_id IS NOT NULL",
     )
-    .fetch_optional(&state.db)
+    .fetch_optional(db)
     .await
-    .map_err(internal)?
-    .flatten();
-    let Some(key) = key else {
-        return Ok(());
+    .ok()??;
+    let Ok(http) = crate::network::http().build() else {
+        return Some(false);
     };
-    let http = crate::network::http().build().map_err(internal)?;
     let remote = Remote {
         http: &http,
         base,
@@ -144,18 +154,15 @@ async fn leave_account(state: &CoreState) -> Result<(), ApiError> {
         timeout: Some(LEAVE_TIMEOUT),
     };
     match call::<LeaveAccount>(&remote, &(), &(), Empty).await {
-        Ok(_) => Ok(()),
+        Ok(_) => Some(true),
         Err(CallError::Api { error, .. })
             if error.error == ErrorCode::CoreRemoved =>
         {
-            Ok(())
+            Some(true)
         }
         Err(error) => {
             tracing::warn!(%error, "could not leave the account");
-            Err(ApiError::new(
-                ErrorCode::InternalError,
-                "Core could not reach Amberite to leave the account. Check the internet connection and try again, or remove this Core in Amberite under Settings, Cores.",
-            ))
+            Some(false)
         }
     }
 }
