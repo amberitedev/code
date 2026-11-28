@@ -22,7 +22,7 @@
 				:color="
 					!hoveringTest && !testingJava
 						? testingJavaSuccess === true
-							? 'green'
+							? 'brand'
 							: 'red'
 						: undefined
 				"
@@ -33,18 +33,18 @@
 					'--legacy-button-color':
 						(!hoveringTest && !testingJava
 							? testingJavaSuccess === true
-								? 'green'
+								? 'brand'
 								: 'red'
 							: 'standard') &&
 						(!hoveringTest && !testingJava
 							? testingJavaSuccess === true
-								? 'green'
+								? 'brand'
 								: 'red'
 							: 'standard') !== 'standard'
 							? `var(--color-${
 									!hoveringTest && !testingJava
 										? testingJavaSuccess === true
-											? 'green'
+											? 'brand'
 											: 'red'
 										: 'standard'
 								})`

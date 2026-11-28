@@ -3,7 +3,9 @@
 		:type="op.state === 'done' ? 'success' : op.state?.startsWith('fail') ? 'critical' : 'info'"
 		:dismissible="dismissible && isTerminal"
 		:progress="'progress' in op ? (op.progress ?? 0) : 0"
-		:progress-color="op.state === 'done' ? 'green' : op.state?.startsWith('fail') ? 'red' : 'blue'"
+		:progress-color="
+			op.state === 'done' ? 'success' : op.state?.startsWith('fail') ? 'red' : 'blue'
+		"
 		:waiting="!isTerminal && (op.state === 'queued' || !op.progress || op.progress === 0)"
 		@dismiss="$emit('dismiss')"
 	>

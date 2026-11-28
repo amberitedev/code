@@ -229,7 +229,7 @@ async function remove() {
 			>
 				<span
 					class="size-2 shrink-0 rounded-full"
-					:class="online ? 'bg-green' : 'bg-red'"
+					:class="online ? 'bg-brand' : 'bg-red'"
 					aria-hidden="true"
 				/>
 				{{ online ? 'Online' : 'Offline' }}

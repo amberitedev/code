@@ -632,7 +632,7 @@ function openContextMenu(event: MouseEvent) {
 										v-tooltip="outsideWarning ?? `${serverStatus.ping}ms`"
 										aria-hidden="true"
 										:class="{ 'cursor-help': outsideWarning }"
-										:style="`--_signal-${getPingLevel(serverStatus.ping ?? 0)}: var(${outsideWarning ? '--color-orange' : '--color-green'})`"
+										:style="`--_signal-${getPingLevel(serverStatus.ping ?? 0)}: var(${outsideWarning ? '--color-warning' : '--color-brand'})`"
 										stroke-width="3px"
 										class="shrink-0 smart-clickable:allow-pointer-events"
 									/>

@@ -54,7 +54,7 @@
 		<div class="ml-auto shrink-0">
 			<Button
 				type="colored"
-				color="green"
+				color="brand"
 				native-type="button"
 				:disabled="isInstallingSelected"
 				@click="installSelected"

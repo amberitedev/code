@@ -13,7 +13,7 @@
 					<TrashIcon />
 					{{ formatMessage(messages.discard) }}
 				</Button>
-				<Button type="colored" color="green" @click="handleSave">
+				<Button type="colored" color="brand" @click="handleSave">
 					<SaveIcon />
 					{{ formatMessage(commonMessages.saveButton) }}
 				</Button>

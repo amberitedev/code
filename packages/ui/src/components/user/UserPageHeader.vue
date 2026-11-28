@@ -351,7 +351,7 @@ const moreActions = computed<ButtonMenuOption[]>(() => [
 		label: formatMessage(messages.editUserButton),
 		icon: EditIcon,
 		action: () => emit('editUser'),
-		tone: 'green',
+		tone: 'brand',
 		shown: props.showStaffActions && props.isAdmin,
 	},
 	{
@@ -359,7 +359,7 @@ const moreActions = computed<ButtonMenuOption[]>(() => [
 		label: formatMessage(messages.billingButton),
 		icon: CurrencyIcon,
 		action: () => emit('openBilling'),
-		tone: 'green',
+		tone: 'brand',
 		shown: props.showStaffActions && props.isStaff,
 	},
 	{

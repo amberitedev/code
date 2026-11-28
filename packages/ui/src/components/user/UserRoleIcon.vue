@@ -3,7 +3,7 @@
 		v-if="role === 'admin'"
 		v-tooltip="formatMessage(messages.modrinthTeamLabel)"
 		role="img"
-		class="size-4 shrink-0 !text-green"
+		class="size-4 shrink-0 !text-brand"
 	/>
 	<ScaleIcon
 		v-else-if="role === 'moderator'"

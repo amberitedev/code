@@ -334,7 +334,7 @@ async function copyToClipboard(text) {
 									:disabled="copied"
 									@click="copyToClipboard(debugInfo)"
 								>
-									<template v-if="copied"> <CheckIcon class="text-green" /> </template>
+									<template v-if="copied"> <CheckIcon class="text-brand" /> </template>
 									<template v-else> <CopyIcon /> </template>
 								</IconButton>
 							</div>
@@ -345,17 +345,6 @@ async function copyToClipboard(text) {
 		</div>
 	</ModalWrapper>
 </template>
-
-<style>
-.light-mode {
-	--color-orange-bg: rgba(255, 163, 71, 0.2);
-}
-
-.dark-mode,
-.oled-mode {
-	--color-orange-bg: rgba(224, 131, 37, 0.2);
-}
-</style>
 
 <style scoped lang="scss">
 .cta-button {

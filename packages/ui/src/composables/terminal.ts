@@ -25,7 +25,7 @@ function buildTerminalTheme() {
 	const textPrimary = getCssVar('--color-text-primary', '#ffffff')
 	const red = getCssVar('--color-red', '#ff496e')
 	const orange = getCssVar('--color-orange', '#ffa347')
-	const green = getCssVar('--color-green', '#1bd96a')
+	const green = getCssVar('--color-green', '#ff641a')
 	const blue = getCssVar('--color-blue', '#4a9eff')
 	const purple = getCssVar('--color-purple', '#bc3fbc')
 

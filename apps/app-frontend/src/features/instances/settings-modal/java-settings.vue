@@ -272,7 +272,7 @@ const messages = defineMessages({
 									:color="
 										overrideJavaInstall && !hoveringTest && !testingJava
 											? javaTestResult === true
-												? 'green'
+												? 'brand'
 												: 'red'
 											: undefined
 									"
@@ -282,18 +282,18 @@ const messages = defineMessages({
 											// @ts-expect-error upstream's first operand is a non-empty string, so always truthy
 											(overrideJavaInstall && !hoveringTest && !testingJava
 												? javaTestResult === true
-													? 'green'
+													? 'brand'
 													: 'red'
 												: 'standard') &&
 											(overrideJavaInstall && !hoveringTest && !testingJava
 												? javaTestResult === true
-													? 'green'
+													? 'brand'
 													: 'red'
 												: 'standard') !== 'standard'
 												? `var(--color-${
 														overrideJavaInstall && !hoveringTest && !testingJava
 															? javaTestResult === true
-																? 'green'
+																? 'brand'
 																: 'red'
 															: 'standard'
 													})`

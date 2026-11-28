@@ -231,7 +231,7 @@ function saveCacheLimit() {
 		</div>
 
 		<div aria-live="polite" class="empty:hidden">
-			<p v-if="clearedBytes !== null" class="m-0 text-sm text-green">
+			<p v-if="clearedBytes !== null" class="m-0 text-sm text-brand">
 				{{
 					clearedBytes > 0
 						? formatMessage(messages.cleared, { size: formatBytes(clearedBytes, 1) })

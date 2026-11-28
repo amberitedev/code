@@ -12,7 +12,7 @@
 				<TagItem
 					class="border !border-solid !font-medium w-max"
 					:class="{
-						'border-green bg-highlight-green text-green': hostingStatus === 'running',
+						'border-brand bg-brand-highlight text-brand': hostingStatus === 'running',
 						'border-red bg-highlight-red text-red': hostingStatus === 'stopped',
 					}"
 				>

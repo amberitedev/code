@@ -12,7 +12,7 @@
 			<Button
 				v-if="openModal"
 				:type="createVersionButtonSecondary ? 'base' : 'colored'"
-				:color="createVersionButtonSecondary ? undefined : 'green'"
+				:color="createVersionButtonSecondary ? undefined : 'brand'"
 				@click="openModal"
 			>
 				<PlusIcon /> Create version

@@ -374,15 +374,15 @@ export const MODERATION_DB_BADGE: Record<
 		label: 'Prohibited content',
 	},
 	yes: {
-		color: 'var(--color-green)',
+		color: 'var(--color-brand)',
 		label: 'Permissive license',
 	},
 	'with-attribution': {
-		color: 'var(--color-green)',
+		color: 'var(--color-brand)',
 		label: 'Permissive license',
 	},
 	'with-attribution-and-source': {
-		color: 'var(--color-green)',
+		color: 'var(--color-brand)',
 		label: 'Permissive license',
 	},
 	unidentified: {

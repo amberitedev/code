@@ -73,7 +73,7 @@ const barColor = computed(() => {
 	const ratio = Math.min(props.used / props.limit, 1)
 	if (ratio <= WARNING_RATIO) {
 		const orangeWeight = (ratio / WARNING_RATIO) * 100
-		return `color-mix(in oklch, var(--color-green), var(--color-orange) ${orangeWeight}%)`
+		return `color-mix(in oklch, var(--color-brand), var(--color-warning) ${orangeWeight}%)`
 	}
 	const redWeight = ((ratio - WARNING_RATIO) / (1 - WARNING_RATIO)) * 100
 	return `color-mix(in oklch, var(--color-orange), var(--color-red) ${redWeight}%)`

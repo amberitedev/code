@@ -444,7 +444,7 @@ const placeholderClasses: Record<StackedAdmonitionType, string> = {
 	info: 'border-brand-blue bg-bg-blue',
 	warning: 'border-brand-orange bg-bg-orange',
 	critical: 'border-brand-red bg-bg-red',
-	success: 'border-brand-green bg-bg-green',
+	success: 'border-brand bg-brand-highlight',
 }
 
 const messages = defineMessages({

@@ -23,7 +23,7 @@
 				tab.value === value
 					? color === 'gray'
 						? 'border-surface-5 bg-surface-4 text-contrast'
-						: 'border-green bg-highlight-green text-green'
+						: 'border-brand bg-brand-highlight text-brand'
 					: [
 							'border-transparent bg-transparent hover:bg-surface-4',
 							size === 'large' ? 'text-contrast' : 'text-primary',
@@ -44,7 +44,7 @@
 					tab.value === value
 						? color === 'gray'
 							? 'text-contrast'
-							: 'text-green'
+							: 'text-brand'
 						: 'text-secondary'
 				"
 			/>
@@ -70,7 +70,7 @@ const props = defineProps<{
 	value: TabsValue
 	tabs: TabsTab[]
 	wrap?: boolean
-	color?: 'green' | 'gray'
+	color?: 'brand' | 'gray'
 	size?: 'default' | 'large'
 	disabled?: boolean
 }>()

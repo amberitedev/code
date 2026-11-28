@@ -18,7 +18,7 @@
 					<XIcon />
 					{{ formatMessage(commonMessages.cancelButton) }}
 				</Button>
-				<Button type="colored" color="green" @click="confirm">
+				<Button type="colored" color="brand" @click="confirm">
 					<HammerIcon />
 					{{ formatMessage(messages.repairButton) }}
 				</Button>

@@ -1466,7 +1466,7 @@ onBeforeUnmount(() => {
 				type="quiet"
 				@click="copyScreenshotBySelectionKey(item.id)"
 			>
-				<CheckIcon v-if="isScreenshotCopiedBySelectionKey(item.id)" class="text-green" />
+				<CheckIcon v-if="isScreenshotCopiedBySelectionKey(item.id)" class="text-brand" />
 				<ClipboardCopyIcon v-else />
 			</IconButton>
 			<IconButton
