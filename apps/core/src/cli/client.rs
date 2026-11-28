@@ -75,7 +75,7 @@ pub const NOT_ANSWERING: &str =
 fn refused_message() -> String {
     // The pipe itself keeps other users out on Windows: there, this is a Core that died.
     if cfg!(windows) {
-        return "Core stopped answering. See why with: copal logs".into();
+        return "Core stopped answering".into();
     }
     let closed = "Core closed the connection without answering. It does that for every account but the one that set it up";
     match std::env::var("SUDO_USER") {
