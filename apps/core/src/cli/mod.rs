@@ -1,19 +1,24 @@
-//! The `copal` command line. `install`, `uninstall`, `run`, and the hidden `core`, `shim`, and `store` work
-//! on this machine directly; every other command talks to the running Core over the local socket
-//! (see `client`), so it works the same on every OS and with the backend down.
+//! The `copal` command line: managing Core on this machine. Servers are created and managed in
+//! the App; here they are only listed, started and stopped.
 //!
-//! The CLI is for the machine and for controlling servers. Content (mods, packs) stays in the
-//! App. Every command prints text for a person, or with `--json` the JSON Core answered.
+//! `setup`, `uninstall`, `run`, and the hidden `core`, `shim` and `store` work on this machine
+//! directly; every other command talks to the running Core over the local socket (see `client`),
+//! so it works the same on every OS and with the backend down. Every command draws for a
+//! terminal, prints plain lines anywhere else, and prints one JSON document with `--json` (see
+//! `ui`).
 
-mod access;
-mod backups;
 mod call;
 pub mod client;
-mod machine;
+mod doctor;
+mod home;
+mod pairing;
 mod servers;
+mod status;
 mod storage;
 #[cfg(test)]
 mod tests;
+pub mod ui;
+mod update;
 
 use std::path::PathBuf;
 
@@ -23,36 +28,126 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use client::Client;
+use ui::Ui;
 
-/// Copal runs and manages Minecraft servers on this machine.
+/// Core runs Minecraft servers on this computer. Create and manage the servers in Amberite;
+/// this tool manages Core itself.
 #[derive(Debug, Parser)]
-#[command(name = "copal", version)]
+#[command(
+    name = "copal",
+    bin_name = "copal",
+    version,
+    disable_help_subcommand = true,
+    after_help = "Typed alone, copal says where this Core is and what to do next.\n\
+        Core is set up once, by its installer or with: copal setup (needs an admin)."
+)]
 pub struct Cli {
-    /// Print the JSON Core answered, for scripts.
+    /// Print one JSON document instead of text, for scripts.
     #[arg(long, global = true)]
     pub json: bool,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Install Copal as a service on this machine. Run once, as admin.
-    Install {
-        /// The account that may use the copal CLI. Defaults to the one running install.
+    /// Show whether Core runs, who it is paired with, and its servers.
+    #[command(
+        after_help = "For a script, copal list prints the servers alone, and --json prints everything."
+    )]
+    Status,
+    /// Check everything Core needs, problems first, each with its fix.
+    #[command(
+        after_help = "Exits with 1 when a check fails, and with 0 when there are only warnings."
+    )]
+    Doctor {
+        /// Apply every fix that can be applied, without asking.
+        #[arg(long)]
+        fix: bool,
+        /// Show the facts behind every check, not only the failed ones.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Pair this Core with your Amberite account.
+    Pair {
+        /// Show the code and leave, instead of waiting until it is approved.
+        #[arg(long)]
+        no_wait: bool,
+    },
+    /// Remove this Core from its Amberite account.
+    Unpair {
+        /// Do not ask first.
+        #[arg(short, long)]
+        yes: bool,
+    },
+    /// List the servers on this Core.
+    #[command(
+        after_help = "Piped, each server is one line of tab-separated columns: name, state, what it runs, port, who is online, id."
+    )]
+    List,
+    /// Start a server. Without a name, pick one from a list.
+    Start {
+        /// The server's name, or the start of its id.
+        server: Option<String>,
+        /// Accept the Minecraft EULA (https://aka.ms/MinecraftEULA) for every server.
+        #[arg(long)]
+        accept_eula: bool,
+    },
+    /// Stop a server once it has saved. Without a name, pick one from a list.
+    Stop {
+        /// The server's name, or the start of its id.
+        server: Option<String>,
+        /// Stop every running server.
+        #[arg(long, conflicts_with = "server")]
+        all: bool,
+        /// End the server now, without saving. For one that no longer answers.
+        #[arg(long)]
+        kill: bool,
+        /// Stop it even while players are online, without asking.
+        #[arg(short, long)]
+        yes: bool,
+    },
+    /// Show what takes up disk space: servers, backups and shared files.
+    Storage {
+        /// List every server and backup, not only the biggest.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Show the end of Core's own log.
+    #[command(
+        after_help = "A terminal shows this computer's time. Piped, each line is as Core wrote it, in UTC."
+    )]
+    Logs {
+        /// How many lines, up to 1000.
+        #[arg(short = 'n', long, default_value_t = 100)]
+        lines: usize,
+    },
+    /// Update Core, or change how it updates.
+    Update(update::UpdateArgs),
+    /// Remove Core from this computer. Needs an admin.
+    Uninstall {
+        /// Also delete the data folder: every server, world, and backup.
+        #[arg(long, conflicts_with = "keep_data")]
+        remove_data: bool,
+        /// Keep the data folder. Without either flag, a terminal asks.
+        #[arg(long)]
+        keep_data: bool,
+        /// Do not ask first. The data folder is kept unless --remove-data is passed.
+        #[arg(short, long)]
+        yes: bool,
+    },
+    /// Set Core up as a service on this machine. The installer runs this once, as admin.
+    #[command(hide = true)]
+    Setup {
+        /// The account that may use the copal CLI. Defaults to the one running setup.
         #[arg(long)]
         owner: Option<String>,
-        /// Install this copal even when Core has updated itself to a newer version.
+        /// Set up this copal even when Core has updated itself to a newer version.
         #[arg(long)]
         allow_downgrade: bool,
     },
-    /// Remove the service, the accounts, and the firewall rules. Run as admin.
-    Uninstall {
-        /// Also delete the data folder: every server, world, and backup.
-        #[arg(long)]
-        remove_data: bool,
-    },
-    /// Run Core in the foreground.
+    /// Run Core in the foreground. The service runs this.
+    #[command(hide = true)]
     Run {
         /// Set by the Windows service manager.
         #[arg(long, hide = true)]
@@ -71,66 +166,35 @@ pub enum Command {
     /// The shared file pool's store. Core starts this; it is not for people.
     #[command(hide = true)]
     Store(sharing_storage::Args),
-    /// Show whether Core runs, its version, and what its servers are doing.
-    Status,
-    /// Get a fresh pairing code, to enter in Amberite to make this Core yours.
-    Pair,
-    /// Show the end of Core's own log.
-    Logs {
-        /// How many lines, up to 1000.
-        #[arg(short = 'n', long, default_value_t = 100)]
-        lines: usize,
-    },
-    /// Update Core, or change how it updates.
-    #[command(subcommand)]
-    Update(machine::UpdateCommand),
-    /// Show or accept the Minecraft EULA, once for every server on this Core.
-    Eula {
-        /// Accept the EULA (https://aka.ms/MinecraftEULA).
-        #[arg(long)]
-        accept: bool,
-    },
-    /// Create and control servers.
-    #[command(subcommand)]
-    Servers(servers::ServersCommand),
-    /// List, make, and restore backups.
-    #[command(subcommand)]
-    Backups(backups::BackupsCommand),
-    /// The devices signed in to this Core.
-    #[command(subcommand)]
-    Access(access::AccessCommand),
-    /// Show this Core's storage for shared files, or change what it offers others.
-    Storage(storage::StorageArgs),
 }
 
-/// What a command prints: `text` for a person, `json` with `--json`.
-pub struct Output {
-    pub text: String,
+/// How a command ended, after it showed its output through [`Ui`].
+pub struct Done {
+    /// What `--json` prints.
     pub json: Value,
-    /// The command did not do what was asked. It still prints, then exits non-zero.
+    /// The command did not do what was asked: the process exits non-zero.
     pub failed: bool,
 }
 
-impl Output {
-    pub fn new(text: impl Into<String>, json: &impl Serialize) -> Self {
+impl Done {
+    pub fn ok(json: &impl Serialize) -> Self {
         Self {
-            text: text.into(),
             json: serde_json::to_value(json).expect("answers serialize"),
             failed: false,
         }
     }
 
-    pub fn failed(text: impl Into<String>, json: &impl Serialize) -> Self {
+    pub fn failed(json: &impl Serialize) -> Self {
         Self {
             failed: true,
-            ..Self::new(text, json)
+            ..Self::ok(json)
         }
     }
 }
 
 /// Text a server or a mod wrote, made safe to print: every control character but newline and
-/// tab is shown escaped, so console output cannot move the cursor, clear the screen, or change
-/// the terminal. `--json` escapes by itself.
+/// tab is shown escaped, so it cannot move the cursor, clear the screen, or change the terminal.
+/// `--json` escapes by itself.
 pub fn safe(text: &str) -> String {
     text.chars()
         .map(|c| {
@@ -164,47 +228,98 @@ pub fn json_for(error: &color_eyre::Report) -> Value {
     } else {
         "failed"
     };
-    json_error(code, &format!("{error:#}"))
+    let (what, next) = describe(error);
+    let next = next.map(|next| format!(" {next}"));
+    json_error(code, &format!("{what}{}", next.unwrap_or_default()))
 }
 
-/// Run a command that talks to Core, and print its output. False when the command printed
-/// that it failed.
-pub async fn run(command: Command, json: bool) -> Result<bool> {
-    let client = Client::new();
-    let output = match command {
-        Command::Status => machine::status(&client).await?,
-        Command::Pair => machine::pair(&client).await?,
-        Command::Logs { lines } => machine::logs(&client, lines).await?,
-        Command::Update(command) => machine::update(&client, command).await?,
-        Command::Eula { accept } => machine::eula(&client, accept).await?,
-        Command::Servers(servers::ServersCommand::Console(
-            servers::ConsoleCommand::Attach { server },
-        )) => {
-            return servers::attach(&client, &server, json)
-                .await
-                .map(|()| true);
+/// Print how a command ended, and say whether it worked. An error is shown where the person is
+/// looking: inside the frame a terminal has open, as one line anywhere else, as JSON with
+/// `--json`.
+pub fn finish(ui: &Ui, json: bool, result: Result<Done>) -> bool {
+    match result {
+        Ok(done) => {
+            if json {
+                let text = serde_json::to_string_pretty(&done.json)
+                    .expect("JSON values print");
+                println!("{text}");
+            }
+            !done.failed
         }
-        Command::Servers(command) => servers::run(&client, command).await?,
-        Command::Backups(command) => backups::run(&client, command).await?,
-        Command::Access(command) => access::run(&client, command).await?,
-        Command::Storage(args) => storage::run(&client, args).await?,
-        Command::Install { .. }
-        | Command::Uninstall { .. }
-        | Command::Run { .. }
-        | Command::Core
-        | Command::Shim { .. }
-        | Command::Store(_) => {
+        Err(error) if error.is::<ui::Cancelled>() => false,
+        Err(error) => {
+            if json {
+                println!("{}", json_for(&error));
+            } else {
+                let (what, next) = describe(&error);
+                if !ui.abort(&what, next.as_deref()) {
+                    let next = next.map(|next| format!(" {next}"));
+                    eprintln!("Error: {what}{}", next.unwrap_or_default());
+                }
+            }
+            false
+        }
+    }
+}
+
+/// An error as a person reads it: what is wrong, and the next step when there is one. A Core
+/// that does not answer is said the way `copal` alone says it.
+fn describe(error: &color_eyre::Report) -> (String, Option<String>) {
+    let unreachable = error
+        .is::<client::Unreachable>()
+        .then(client::why_unreachable);
+    match unreachable.as_ref().or_else(|| error.downcast_ref()) {
+        Some(client::Stuck { what, next }) => {
+            (what.clone(), Some(next.clone()))
+        }
+        None => (ui::sentence(&format!("{error:#}")), None),
+    }
+}
+
+/// Run a command that talks to Core. False when it failed.
+pub async fn run(command: Option<Command>, json: bool) -> bool {
+    let ui = Ui::new(json);
+    let client = Client::new();
+    let result = match command {
+        None => home::run(&ui, &client).await,
+        Some(Command::Status) => status::run(&ui, &client).await,
+        Some(Command::Doctor { fix, verbose }) => {
+            doctor::run(&ui, &client, fix, verbose).await
+        }
+        Some(Command::Pair { no_wait }) => {
+            pairing::pair(&ui, &client, no_wait).await
+        }
+        Some(Command::Unpair { yes }) => {
+            pairing::unpair(&ui, &client, yes).await
+        }
+        Some(Command::List) => servers::list(&ui, &client).await,
+        Some(Command::Start {
+            server,
+            accept_eula,
+        }) => servers::start(&ui, &client, server, accept_eula).await,
+        Some(Command::Stop {
+            server,
+            all,
+            kill,
+            yes,
+        }) => servers::stop(&ui, &client, server, all, kill, yes).await,
+        Some(Command::Storage { all }) => storage::run(&ui, &client, all).await,
+        Some(Command::Logs { lines }) => {
+            status::logs(&ui, &client, lines).await
+        }
+        Some(Command::Update(args)) => update::run(&ui, &client, args).await,
+        Some(
+            Command::Uninstall { .. }
+            | Command::Setup { .. }
+            | Command::Run { .. }
+            | Command::Core
+            | Command::Shim { .. }
+            | Command::Store(_),
+        ) => {
             unreachable!("main runs the commands that do not talk to Core")
         }
     };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&output.json)?);
-    } else if output.failed {
-        eprintln!("{}", output.text);
-    } else if !output.text.is_empty() {
-        println!("{}", output.text);
-    }
-    Ok(!output.failed)
+    finish(&ui, json, result)
 }
 
 /// `on` or `off`.
@@ -223,11 +338,4 @@ impl From<Switch> for bool {
 /// `true` as `on`, for showing settings.
 fn on_off(on: bool) -> &'static str {
     if on { "on" } else { "off" }
-}
-
-/// A unix time as the machine's local date and time.
-fn local_time(time: chrono::DateTime<chrono::Utc>) -> String {
-    time.with_timezone(&chrono::Local)
-        .format("%Y-%m-%d %H:%M")
-        .to_string()
 }

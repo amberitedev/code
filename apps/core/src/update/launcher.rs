@@ -3,7 +3,7 @@
 //! trial: if it does not write its health marker within [`HEALTH_TIMEOUT`], the launcher stops
 //! it, puts the database back, and runs the previous version.
 //!
-//! The launcher is the binary `copal install` put in place, or the one run by hand in
+//! The launcher is the binary `copal setup` put in place, or the one run by hand in
 //! development, and the updater never replaces it. So an old launcher starts every newer Core,
 //! and what it relies on never changes:
 //! - `versions/state.json`, as `versions::State` reads it;

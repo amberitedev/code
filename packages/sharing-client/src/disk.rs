@@ -13,10 +13,14 @@ pub fn room(path: &Path) -> io::Result<u64> {
 
 const MB: u64 = 1024 * 1024;
 const GB: u64 = 1024 * MB;
+const TB: u64 = 1024 * GB;
 
-/// A size as people read it: gigabytes with one decimal, or whole megabytes below one.
+/// A size as people read it: terabytes or gigabytes with one decimal, or whole megabytes below
+/// one gigabyte.
 pub fn label(bytes: u64) -> String {
-    if bytes >= GB {
+    if bytes >= TB {
+        format!("{:.1} TB", bytes as f64 / TB as f64)
+    } else if bytes >= GB {
         format!("{:.1} GB", bytes as f64 / GB as f64)
     } else {
         format!("{} MB", bytes.div_ceil(MB))
@@ -64,6 +68,7 @@ mod tests {
         assert_eq!(super::label(1), "1 MB");
         assert_eq!(super::label(900 * super::MB), "900 MB");
         assert_eq!(super::label(1156 * super::MB), "1.1 GB");
+        assert_eq!(super::label(1024 * super::GB), "1.0 TB");
     }
 
     #[test]

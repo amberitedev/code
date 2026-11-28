@@ -14,7 +14,7 @@ use super::Launch;
 
 /// Whose account Java runs as.
 pub enum RunAs {
-    /// Development without `copal install`: the shim's own account.
+    /// Development without `copal setup`: the shim's own account.
     Shim,
     /// `copal-servers`. On Windows the shim logs on with the password install stored.
     Servers {

@@ -1,15 +1,14 @@
-//! Argument parsing, and one round trip per command group through a real local socket.
+//! Argument parsing, and one round trip per command through a real local socket.
 
-use contracts::core::{Channel, Schedule, Weekday};
 use std::sync::Arc;
 
 use clap::{CommandFactory, Parser};
-use contracts::{ApiError, ErrorCode};
-
-use super::{
-    Cli, Client, Command, backups::BackupsCommand, machine::UpdateCommand,
-    servers::ServersCommand,
+use contracts::{
+    ApiError, ErrorCode,
+    core::{Channel, CheckState},
 };
+
+use super::{Cli, Client, Command, ui::Ui, update::UpdateArgs};
 use crate::{
     access::CoreAccess,
     api::{self, CoreState},
@@ -23,57 +22,90 @@ fn parse(args: &str) -> Result<Cli, clap::Error> {
     Cli::try_parse_from(std::iter::once("copal").chain(args.split(' ')))
 }
 
+/// A test is no terminal: commands print nothing here and never ask.
+fn ui() -> Ui {
+    Ui::new(true)
+}
+
 #[test]
 fn the_command_tree_is_valid() {
     Cli::command().debug_assert();
 }
 
 #[test]
+fn only_the_essentials_are_offered() {
+    let command = Cli::command();
+    let offered: Vec<&str> = command
+        .get_subcommands()
+        .filter(|command| !command.is_hide_set())
+        .map(clap::Command::get_name)
+        .collect();
+    assert_eq!(
+        offered,
+        [
+            "status",
+            "doctor",
+            "pair",
+            "unpair",
+            "list",
+            "start",
+            "stop",
+            "storage",
+            "logs",
+            "update",
+            "uninstall",
+        ]
+    );
+}
+
+#[test]
 fn arguments_parse_into_commands() {
-    let cli = parse("--json update apply --allow-downgrade").unwrap();
+    assert!(Cli::try_parse_from(["copal"]).unwrap().command.is_none());
+    let cli = parse("--json update --yes --allow-downgrade").unwrap();
     assert!(cli.json);
     assert!(matches!(
         cli.command,
-        Command::Update(UpdateCommand::Apply {
+        Some(Command::Update(UpdateArgs {
+            yes: true,
             allow_downgrade: true,
             retry: false,
-        })
+            ..
+        }))
     ));
     assert!(matches!(
-        parse("update apply --retry").unwrap().command,
-        Command::Update(UpdateCommand::Apply {
-            allow_downgrade: false,
-            retry: true,
-        })
+        parse("update --channel beta").unwrap().command,
+        Some(Command::Update(UpdateArgs {
+            channel: Some(Channel::Beta),
+            ..
+        }))
     ));
     assert!(matches!(
-        parse("update channel beta").unwrap().command,
-        Command::Update(UpdateCommand::Channel {
-            channel: Some(Channel::Beta)
+        parse("stop --all --kill").unwrap().command,
+        Some(Command::Stop {
+            server: None,
+            all: true,
+            kill: true,
+            yes: false,
         })
     ));
-    let Command::Servers(ServersCommand::Restarts { at, on, smart, .. }) =
-        parse("servers restarts survival --at 04:30 --on sunday --smart 12")
-            .unwrap()
-            .command
+    let Some(Command::Start {
+        server,
+        accept_eula,
+    }) = parse("start survival --accept-eula").unwrap().command
     else {
-        panic!("not restarts");
+        panic!("not start");
     };
-    assert_eq!(at.map(String::from).as_deref(), Some("04:30"));
-    assert_eq!(on, Some(Weekday::Sunday));
-    assert_eq!(smart, Some(12));
-    let Command::Servers(ServersCommand::Console(
-        super::servers::ConsoleCommand::Send { command, .. },
-    )) = parse("servers console send survival say hello there")
-        .unwrap()
-        .command
-    else {
-        panic!("not console send");
-    };
-    assert_eq!(command, ["say", "hello", "there"]);
-    assert!(matches!(parse("pair").unwrap().command, Command::Pair));
+    assert_eq!(server.as_deref(), Some("survival"));
+    assert!(accept_eula);
+    assert!(matches!(
+        parse("doctor --fix").unwrap().command,
+        Some(Command::Doctor {
+            fix: true,
+            verbose: false,
+        })
+    ));
     // The json flag works after the command too.
-    assert!(parse("backups list survival --json").unwrap().json);
+    assert!(parse("list --json").unwrap().json);
 }
 
 #[test]
@@ -106,14 +138,16 @@ fn errors_print_as_json_in_cores_shape() {
 #[test]
 fn bad_arguments_are_refused() {
     for args in [
-        "servers java survival",
-        "servers java survival /usr/bin/java --managed",
-        "servers restarts survival --on sunday",
-        "servers restarts survival --at 25:00",
-        "servers restarts survival --at 04:00 --no-schedule",
-        "update channel nightly",
-        "backups schedule survival --every 6 --off",
-        "servers console send survival",
+        "stop survival --all",
+        "update --channel nightly",
+        "update --check --yes",
+        "update --rollback --retry",
+        "uninstall --remove-data --keep-data",
+        "logs -n many",
+        // Servers are managed in the App.
+        "servers list",
+        "eula --accept",
+        "install",
     ] {
         assert!(parse(args).is_err(), "{args} parsed");
     }
@@ -189,24 +223,39 @@ async fn core() -> (tempfile::TempDir, Arc<CoreState>, Client) {
 }
 
 #[tokio::test]
-async fn core_commands_round_trip() {
+async fn status_and_update_settings_round_trip() {
     let (_dir, _state, client) = core().await;
-    let eula = super::machine::eula(&client, false).await.unwrap();
-    assert!(eula.json["accepted_at"].is_null());
-    let eula = super::machine::eula(&client, true).await.unwrap();
-    assert!(eula.json["accepted_at"].is_string());
-    let status = super::machine::update(
+    let ui = ui();
+    let settings = super::update::run(
+        &ui,
         &client,
-        UpdateCommand::Channel {
+        UpdateArgs {
             channel: Some(Channel::Alpha),
+            ..no_update_flags()
         },
     )
     .await
     .unwrap();
-    assert_eq!(status.json["channel"], "alpha");
-    let status = super::machine::status(&client).await.unwrap();
+    assert_eq!(settings.json["channel"], "alpha");
+    let status = super::status::run(&ui, &client).await.unwrap();
     assert_eq!(status.json["update"]["channel"], "alpha");
-    assert!(status.text.contains("No servers yet"), "{}", status.text);
+    assert_eq!(status.json["pairing"]["paired"], false);
+    assert_eq!(status.json["servers"], serde_json::json!([]));
+    let home = super::home::run(&ui, &client).await.unwrap();
+    assert_eq!(home.json["state"], "not_paired");
+    assert_eq!(home.json["next"], "copal pair");
+}
+
+fn no_update_flags() -> UpdateArgs {
+    UpdateArgs {
+        check: false,
+        yes: false,
+        channel: None,
+        auto: None,
+        rollback: false,
+        retry: false,
+        allow_downgrade: false,
+    }
 }
 
 /// Store `code` as the one Core shows, as the pairing loop does once Amberite gives it one.
@@ -223,168 +272,122 @@ async fn show_code(db: &sqlx::SqlitePool, code: &str) {
 }
 
 #[tokio::test]
-async fn an_unpaired_core_shows_its_code() {
+async fn pairing_shows_the_code_then_who_it_is_paired_with() {
     let (_dir, state, client) = core().await;
-    let status = super::machine::status(&client).await.unwrap();
-    assert!(
-        status.text.contains("still getting a code"),
-        "{}",
-        status.text
-    );
-    show_code(&state.db, "mzuxd576").await;
-    let status = super::machine::status(&client).await.unwrap();
-    assert!(status.text.contains("enter MZUX-D576"), "{}", status.text);
-    assert!(status.text.contains("copal pair"), "{}", status.text);
-    assert_eq!(status.json["pairing"]["code"], "MZUX-D576");
-
-    // `copal pair` wakes the pairing loop, played here, and prints the code it gets.
+    let ui = ui();
+    // With no code yet, `copal pair` wakes the pairing loop, played here, and shows what it
+    // gets. Outside a terminal it does not wait for the approval.
     let loop_state = Arc::clone(&state);
     let pairing_loop = tokio::spawn(async move {
         loop_state.access.new_code.notified().await;
         show_code(&loop_state.db, "abcd2345").await;
     });
-    let pair = super::machine::pair(&client).await.unwrap();
-    assert!(pair.text.contains("enter ABCD-2345"), "{}", pair.text);
+    let pair = super::pairing::pair(&ui, &client, false).await.unwrap();
+    assert_eq!(pair.json["code"], "ABCD-2345");
     pairing_loop.await.unwrap();
+    // A code that still works is shown again rather than replaced.
+    let pair = super::pairing::pair(&ui, &client, true).await.unwrap();
+    assert_eq!(pair.json["code"], "ABCD-2345");
 
-    // Once paired, both say so.
     sqlx::query(
         "UPDATE core SET owner_user_id = 'owner', backend_key = 'amc_test'",
     )
     .execute(&state.db)
     .await
     .unwrap();
-    let status = super::machine::status(&client).await.unwrap();
-    assert!(!status.text.contains("not paired"), "{}", status.text);
-    let error = super::machine::pair(&client).await.err().unwrap();
-    assert!(error.to_string().contains("already paired"), "{error}");
+    sqlx::query(
+        "INSERT INTO users (id, name, updated_at) VALUES ('owner', 'ilai', 0)",
+    )
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let pair = super::pairing::pair(&ui, &client, false).await.unwrap();
+    assert_eq!(pair.json["paired"], true);
+    assert_eq!(pair.json["owner"], "ilai");
+    assert!(!pair.failed);
+    let home = super::home::run(&ui, &client).await.unwrap();
+    assert_eq!(home.json["state"], "running");
+
+    // The way out asks first, and with nobody to ask it names the flag.
+    let error = super::pairing::unpair(&ui, &client, false)
+        .await
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("--yes"), "{error}");
+    let unpaired = super::pairing::unpair(&ui, &client, true).await.unwrap();
+    assert_eq!(unpaired.json["paired"], false);
 }
 
 #[tokio::test]
-async fn server_commands_round_trip() {
+async fn servers_are_listed_started_and_stopped_by_name() {
     let (_dir, state, client) = core().await;
-    let server = state.servers.create("Survival").await.unwrap();
-    let memory = super::servers::run(
-        &client,
-        parse("servers memory survival 3072").unwrap_servers(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(memory.json["memory_mb"], 3072);
-    let restarts = super::servers::run(
-        &client,
-        parse("servers restarts survival --crash off --at 05:00 --on monday")
-            .unwrap_servers(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        crate::servers::restarts::get(&state.db, &server.id)
+    let ui = ui();
+    state.servers.create("Survival").await.unwrap();
+    let list = super::servers::list(&ui, &client).await.unwrap();
+    assert_eq!(list.json[0]["name"], "Survival");
+    // With nobody to pick from a list, the answer names the servers.
+    let error = super::servers::start(&ui, &client, None, false)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        error.to_string().contains("copal start <server>")
+            && error.to_string().contains("Survival"),
+        "{error}"
+    );
+    // No server starts before the EULA is accepted, and the flag that accepts it is named.
+    let error =
+        super::servers::start(&ui, &client, Some("survival".into()), false)
             .await
+            .err()
+            .unwrap();
+    assert!(error.to_string().contains("--accept-eula"), "{error}");
+    let stopped = super::servers::stop(
+        &ui,
+        &client,
+        Some("survival".into()),
+        false,
+        false,
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(stopped.json["power_state"], "stopped");
+    let none = super::servers::stop(&ui, &client, None, true, false, false)
+        .await
+        .unwrap();
+    assert_eq!(none.json, serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn storage_and_doctor_report_what_core_measured() {
+    let (_dir, state, client) = core().await;
+    let ui = ui();
+    state.servers.create("Survival").await.unwrap();
+    let storage = super::storage::run(&ui, &client, false).await.unwrap();
+    assert_eq!(storage.json["servers"][0]["name"], "Survival");
+    assert!(storage.json["total"].as_u64().unwrap() > 0);
+
+    let doctor = super::doctor::run(&ui, &client, false, false)
+        .await
+        .unwrap();
+    let state_of = |name: &str| {
+        doctor.json["checks"]
+            .as_array()
             .unwrap()
-            .schedule,
-        Some(Schedule::Weekly {
-            on: Weekday::Monday,
-            at: "05:00".parse().unwrap()
-        })
+            .iter()
+            .find(|check| check["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} check"))["state"]
+            .clone()
+    };
+    // This Core runs by hand, with no backend: said, and not a failure.
+    assert_eq!(
+        state_of("service"),
+        serde_json::to_value(CheckState::Warn).unwrap()
     );
-    assert!(restarts.text.contains("after a crash: off"));
-    let error = super::servers::run(
-        &client,
-        parse("servers start survival").unwrap_servers(),
-    )
-    .await
-    .err()
-    .unwrap();
-    assert!(error.to_string().contains("EULA"), "{error}");
-    // Core says why it did not pass a command on, and the command fails.
-    let error = super::servers::run(
-        &client,
-        parse("servers console send survival say hi").unwrap_servers(),
-    )
-    .await
-    .err()
-    .unwrap();
-    assert!(error.to_string().contains("not running"), "{error}");
-}
-
-#[tokio::test]
-async fn backup_commands_read_what_the_backup_routes_send() {
-    let (_dir, state, client) = core().await;
-    let server = state.servers.create("Survival").await.unwrap().id;
-    // A pre-update backup that finished, as the engine records one.
-    sqlx::query(
-        "INSERT INTO backups (id, server_id, name, kind, state, created_at) \
-         VALUES (?, ?, 'Before the update', 'pre_update', 'done', 0)",
-    )
-    .bind(uuid::Uuid::new_v4().to_string())
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    let list = super::backups::run(
-        &client,
-        BackupsCommand::List {
-            server: "survival".into(),
-        },
-    )
-    .await
-    .unwrap();
-    assert!(
-        list.text.contains("Before the update (scheduled)"),
-        "{}",
-        list.text
+    assert_eq!(
+        state_of("pairing"),
+        serde_json::to_value(CheckState::Skip).unwrap()
     );
-}
-
-trait UnwrapServers {
-    fn unwrap_servers(self) -> ServersCommand;
-}
-
-impl UnwrapServers for Result<Cli, clap::Error> {
-    fn unwrap_servers(self) -> ServersCommand {
-        match self.unwrap().command {
-            Command::Servers(command) => command,
-            other => panic!("{other:?} is not a servers command"),
-        }
-    }
-}
-
-#[tokio::test]
-async fn failed_backups_say_why() {
-    let (_dir, state, client) = core().await;
-    let server = state.servers.create("Survival").await.unwrap().id;
-    let backup = uuid::Uuid::new_v4().to_string();
-    sqlx::query(
-        "INSERT INTO backups (id, server_id, name, kind, state, created_at) \
-         VALUES (?, ?, 'Nightly', 'scheduled', 'failed', 0)",
-    )
-    .bind(&backup)
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO backup_operations (backup_id, server_id, kind, state, queued_at, error) \
-         VALUES (?, ?, 'create', 'failed', 0, 'Core may not read world/level.dat')",
-    )
-    .bind(&backup)
-    .bind(&server)
-    .execute(&state.db)
-    .await
-    .unwrap();
-    let list = super::backups::run(
-        &client,
-        BackupsCommand::List {
-            server: "survival".into(),
-        },
-    )
-    .await
-    .unwrap();
-    assert!(
-        list.text
-            .contains("create failed: Core may not read world/level.dat"),
-        "{}",
-        list.text
-    );
+    assert_eq!(doctor.json["checks"][0]["group"], "computer");
 }

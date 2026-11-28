@@ -14,14 +14,20 @@ bytes = { workspace = true }
 cap-std = "3.4"
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
+# Every prompt, spinner and step line the CLI shows in a terminal.
+cliclack = "0.5.7"
 color-eyre = { workspace = true }
 # The owner's devices reach the API with no port forwarded (`network::connect`).
 connect = { workspace = true }
+# Colours for what cliclack does not draw itself. The version cliclack uses.
+console = "0.16.6"
 contracts = { workspace = true, features = ["clap", "client", "server", "sqlx"] }
 crab_nat = "0.8.1"
 dunce = { workspace = true }
 # The engine runs this Core's instances, as it runs the App's.
 engine = { workspace = true }
+# Total and free space of the data folder's disk, for `copal doctor` and `copal storage`.
+fs4 = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 http-body-util = "0.1.3"

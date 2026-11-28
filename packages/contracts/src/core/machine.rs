@@ -203,6 +203,76 @@ pub struct ReachabilityCheck {
     pub text: String,
 }
 
+/// What the Core itself can tell `copal doctor`. The CLI adds what only an admin on the machine
+/// can see: the service and the firewall.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct Doctor {
+    /// The Core's port, which the firewall must let in: TCP and UDP.
+    pub port: u16,
+    /// Installed as a service. False for a Core someone runs by hand.
+    pub installed: bool,
+    pub checks: Vec<DoctorCheck>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct DoctorCheck {
+    /// One lowercase word that names the check, such as `pairing`.
+    pub name: String,
+    pub state: CheckState,
+    /// What was found, in one line.
+    pub summary: String,
+    /// The facts behind the summary.
+    pub details: Vec<CheckDetail>,
+    /// What to do about it, first step first. Empty when nothing is wrong.
+    pub fix: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum CheckState {
+    Ok,
+    /// Works, but not as well as it could.
+    Warn,
+    Fail,
+    /// Not run, or could not tell.
+    Skip,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct CheckDetail {
+    pub label: String,
+    pub value: String,
+}
+
+/// What takes up space on the Core's disk. Bytes throughout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct DiskUsage {
+    /// The size of the disk the data folder is on.
+    pub total: u64,
+    pub free: u64,
+    pub servers: Vec<ServerUsage>,
+    /// The shared files the store holds.
+    pub shared: u64,
+    /// Minecraft, loaders and Java, which the servers share.
+    pub game_files: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
+pub struct ServerUsage {
+    pub id: String,
+    pub name: String,
+    /// The server's folder: its world, mods and settings.
+    pub files: u64,
+    pub backups: u64,
+    pub backup_count: u32,
+}
+
 #[cfg(test)]
 pub(super) fn ts_types() -> Vec<String> {
     use ts_rs::TS;
@@ -224,5 +294,11 @@ pub(super) fn ts_types() -> Vec<String> {
         ReachabilityReport::decl(&cfg),
         Reach::decl(&cfg),
         ReachabilityCheck::decl(&cfg),
+        Doctor::decl(&cfg),
+        DoctorCheck::decl(&cfg),
+        CheckState::decl(&cfg),
+        CheckDetail::decl(&cfg),
+        DiskUsage::decl(&cfg),
+        ServerUsage::decl(&cfg),
     ]
 }

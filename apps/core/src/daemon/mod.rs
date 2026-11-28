@@ -39,7 +39,7 @@ use paths::Paths;
 const USER_AGENT: &str = concat!("copal/", env!("CARGO_PKG_VERSION"));
 
 /// `copal run`: the launcher (see `update::launcher`), which runs Core as its child. `service`
-/// is set by the Windows service manager, which starts Copal that way.
+/// is set by the Windows service manager, which starts Core that way.
 pub fn run(service: bool) -> Result<()> {
     if service {
         #[cfg(windows)]
@@ -100,11 +100,11 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
     let owner = match record {
         Some(record) => {
             let accounts = Accounts::find()?.ok_or_else(|| {
-                eyre!("the copal accounts are missing. Run copal install again")
+                eyre!("the copal accounts are missing. Run copal setup again")
             })?;
             if !accounts.is_current()? {
                 bail!(
-                    "Copal is installed here, so Core runs as the {} account. {}",
+                    "Core is installed here, so it runs as the {} account. {}",
                     accounts::CORE,
                     if cfg!(windows) {
                         "Start the copal service instead"
@@ -248,7 +248,7 @@ pub async fn serve(stop: impl Future<Output = ()>) -> Result<Exit> {
         %address,
         data = %paths.root().display(),
         fingerprint = %identity.fingerprint,
-        "Copal {} is running",
+        "Core {} is running",
         env!("CARGO_PKG_VERSION")
     );
     tokio::spawn(answer_once(paths.clone()));

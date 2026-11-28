@@ -58,18 +58,18 @@ pub fn current() -> Version {
 #[derive(Debug, thiserror::Error)]
 pub enum UpdateError {
     #[error(
-        "{0} is older than this Core ({1}). Downgrading needs copal update apply --allow-downgrade"
+        "{0} is older than this Core ({1}). Downgrading needs copal update --allow-downgrade"
     )]
     Downgrade(Version, Version),
     #[error("only the copal CLI on this machine can downgrade Core")]
     DowngradeRemote,
-    #[error("Copal {0} is already running")]
+    #[error("Core {0} is already running")]
     UpToDate(Version),
     #[error(
-        "Copal {0} was tried here and Core went back: it {1}. To try it again: copal update apply --retry"
+        "Core {0} was tried here and Core went back: it {1}. To try it again: copal update --retry"
     )]
     FailedBefore(Version, &'static str),
-    #[error("there is no Copal release on the {0:?} channel")]
+    #[error("there is no Core release on the {} channel", format!("{:?}", .0).to_lowercase())]
     NoRelease(Channel),
     #[error("Core is still checking its last update. Try again in a minute")]
     OnTrial,

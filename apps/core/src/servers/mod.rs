@@ -84,7 +84,7 @@ pub enum ServerError {
     #[error("Core is out of server ports")]
     NoPorts,
     #[error(
-        "accept the Minecraft EULA (https://aka.ms/MinecraftEULA) first: copal eula --accept"
+        "accept the Minecraft EULA (https://aka.ms/MinecraftEULA) first, in Amberite or with copal start <server> --accept-eula"
     )]
     Eula,
     #[error(transparent)]

@@ -187,6 +187,8 @@ pub enum Action {
 #[cfg_attr(feature = "export-ts", derive(ts_rs::TS))]
 pub struct PairingStatus {
     pub paired: bool,
+    /// The owner's name while paired.
+    pub owner: Option<String>,
     /// The code to enter in the App, like `MZUX-D576`. Null once paired, and while the Core is
     /// still getting one from Amberite.
     pub code: Option<String>,

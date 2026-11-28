@@ -33,6 +33,17 @@ const PING: Duration = Duration::from_secs(30);
 /// How long opening the link may take.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The link as `copal doctor` reports it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Link {
+    /// Not open yet since Core started or paired.
+    #[default]
+    Opening,
+    Open,
+    /// Why it last failed to open, or that it dropped.
+    Down(String),
+}
+
 /// Wait before opening the link again after `failures` failures in a row: 5 seconds, doubling, at
 /// most 5 minutes. A Core without a link cannot be reached from outside its own network.
 fn backoff(failures: u32) -> Duration {
@@ -47,13 +58,17 @@ pub async fn hold(sync: &Sync, key: &str) {
         .http1_only()
         .build()
         .expect("a client with no custom TLS always builds");
+    let set = |link| *sync.access.link.lock().expect("not poisoned") = link;
+    set(Link::Opening);
     let mut failures = 0;
     loop {
         match tokio::time::timeout(OPEN_TIMEOUT, open(&http, sync, key)).await {
             Ok(Ok(socket)) => {
                 info!("ready to be introduced to this Core's owner");
+                set(Link::Open);
                 let opened = Instant::now();
                 serve(sync, socket).await;
+                set(Link::Down("the connection dropped".into()));
                 // A link that drops at once, as when another Core with this key replaces it,
                 // is a failure: both would otherwise take turns forever.
                 failures = if opened.elapsed() > PING {
@@ -66,8 +81,15 @@ pub async fn hold(sync: &Sync, key: &str) {
             Ok(Err(Refused::Other(problem))) => {
                 failures += 1;
                 debug!(%problem, "could not open the link to the backend");
+                set(Link::Down(problem));
             }
-            Err(_) => failures += 1,
+            Err(_) => {
+                failures += 1;
+                set(Link::Down(format!(
+                    "no answer within {} seconds",
+                    OPEN_TIMEOUT.as_secs()
+                )));
+            }
         }
         tokio::time::sleep(backoff(failures)).await;
     }

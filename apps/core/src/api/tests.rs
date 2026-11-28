@@ -92,7 +92,7 @@ async fn core_with_backend(backend: Option<&str>) -> Core {
         db.clone(),
         paths.clone(),
         core_id.clone(),
-        None,
+        backend.map(Into::into),
         false,
         Arc::new(tokio::sync::Notify::new()),
     ));
@@ -1044,6 +1044,82 @@ async fn removing_the_core_from_its_account_ends_every_session() {
         .call(Method::GET, "/sessions", Some(&owner), None, None)
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn the_cli_leaves_the_account_before_it_unpairs() {
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    // The backend's answer to `DELETE /core`.
+    let answer = Arc::new(AtomicU16::new(503));
+    let app = Router::new()
+        .route(
+            "/core",
+            axum::routing::delete(
+                |axum::extract::State(answer): axum::extract::State<
+                    Arc<AtomicU16>,
+                >| async move {
+                    let status =
+                        StatusCode::from_u16(answer.load(Ordering::SeqCst))
+                            .unwrap();
+                    let body = json!({
+                        "error": if status == StatusCode::GONE { "core_removed" } else { "internal_error" },
+                        "description": "",
+                    });
+                    (status, axum::Json(body))
+                },
+            ),
+        )
+        .with_state(Arc::clone(&answer));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await });
+
+    let core = core_with_backend(Some(&url)).await;
+    sqlx::query("UPDATE core SET backend_key = 'amc_key'")
+        .execute(&core.state.db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO users (id, name, updated_at) VALUES ('owner', 'Ilai', 0)",
+    )
+    .execute(&core.state.db)
+    .await
+    .unwrap();
+    let pairing = |method| {
+        let mut request = Request::builder()
+            .method(method)
+            .uri("/pairing")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(Local);
+        core.send(request)
+    };
+    let (_, status) = pairing(Method::GET).await;
+    assert_eq!(status["owner"], "Ilai");
+
+    let (status, error) = pairing(Method::DELETE).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        error["description"]
+            .as_str()
+            .unwrap()
+            .contains("could not reach Amberite")
+    );
+    assert_eq!(
+        pairing(Method::GET).await.1["paired"],
+        true,
+        "nothing changed"
+    );
+
+    // Already gone from the backend: unpair here too.
+    answer.store(410, Ordering::SeqCst);
+    assert_eq!(pairing(Method::DELETE).await.0, StatusCode::NO_CONTENT);
+    let (_, status) = pairing(Method::GET).await;
+    assert_eq!(
+        (status["paired"].clone(), status["owner"].clone()),
+        (json!(false), Value::Null)
+    );
 }
 
 #[tokio::test]
@@ -2116,4 +2192,46 @@ async fn a_running_server_takes_the_newest_pushed_version_once_it_stops() {
             .await,
         0
     );
+}
+
+#[tokio::test]
+async fn the_doctor_and_disk_usage_are_the_owners() {
+    let core = core().await;
+    let owner = core.sign_in("owner").await;
+
+    let (status, doctor) = core
+        .call(Method::GET, "/doctor", Some(&owner), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let checks = doctor["checks"].as_array().unwrap();
+    let named = |name: &str| {
+        checks.iter().find(|check| check["name"] == name).unwrap()["state"]
+            .clone()
+    };
+    assert_eq!(
+        checks
+            .iter()
+            .map(|check| &check["name"])
+            .collect::<Vec<_>>(),
+        ["pairing", "backend", "router", "ports", "java"]
+    );
+    // No backend is set and the network is off in tests.
+    for skipped in ["pairing", "backend", "router", "ports"] {
+        assert_eq!(named(skipped), "skip", "{skipped}");
+    }
+    assert_eq!(named("java"), "ok");
+    assert_eq!(doctor["installed"], false);
+
+    let (status, disk) = core
+        .call(Method::GET, "/disk", Some(&owner), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(disk["servers"][0]["name"], "A");
+
+    for path in ["/doctor", "/disk"] {
+        assert_eq!(
+            core.call(Method::GET, path, None, None, None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
 }

@@ -1,425 +1,376 @@
-//! `copal servers ...`. A server is named by its id, the start of its id, or its name.
+//! `copal list`, `copal start` and `copal stop`. A server is named by its name, or the start of
+//! its id. Everything else about a server is done in the App.
 
 use std::time::Duration;
 
-use clap::{ArgGroup, Subcommand};
 use color_eyre::eyre::{Result, bail};
-use futures::StreamExt;
-use serde::Deserialize;
-use tokio_tungstenite::tungstenite::Message;
-
 use contracts::{
     Empty, Json,
     core::{
-        AcceptEula, ChangePower, CreateServer, DeleteServer, GetInsight,
-        GetMachine, GetPerformance, GetServer, InstallLoader, JavaPath,
-        JvmFlags, ListServers, Loader, LoaderInstall, Memory, NewServer,
-        PowerAction, PowerChange, Reach, Schedule, SendCommand, Server,
-        ServerId, ServerInsight, ServerPower, SetFlags, SetJava, SetMemory,
-        SetRestarts, TimeOfDay, Weekday,
+        AcceptEula, ChangePower, GetEula, GetServer, ListServers, PowerAction,
+        PowerChange, Server, ServerId, ServerPower,
     },
 };
 
-use super::{Client, Output, Switch, call::call, on_off};
+use super::{
+    Client, Done,
+    call::call,
+    ui::{self, Mark, Ui},
+};
 
-#[derive(Debug, Subcommand)]
-pub enum ServersCommand {
-    /// List every server.
-    List,
-    /// Create a Vanilla server. Content and other loaders are set up from the App.
-    Create {
-        name: String,
-        /// The Minecraft version, such as 1.21.1.
-        #[arg(long)]
-        version: String,
-        /// Accept the Minecraft EULA (https://aka.ms/MinecraftEULA) for every server.
-        #[arg(long)]
-        accept_eula: bool,
-    },
-    /// Delete a stopped server: its world, files, and settings. There is no undo.
-    Delete { server: String },
-    /// Start a server.
-    Start { server: String },
-    /// Stop a server, waiting until it has saved and exited.
-    Stop { server: String },
-    /// Kill a server's Java process now, without saving.
-    Kill { server: String },
-    /// Stop a server, then start it again.
-    Restart { server: String },
-    /// Read a server's console or send it a command.
-    #[command(subcommand)]
-    Console(ConsoleCommand),
-    /// Who is online, whether the server answers, its last crash, and whether players can
-    /// reach it.
-    Info { server: String },
-    /// Show or set the most memory a server's Java may use, and its JVM flags.
-    Memory {
-        server: String,
-        /// In MB. The server uses it from its next start.
-        mb: Option<u32>,
-        /// The server's own JVM flags instead of the tuned ones, such as "-XX:+UseZGC".
-        #[arg(
-            long,
-            conflicts_with = "default_flags",
-            allow_hyphen_values = true
-        )]
-        flags: Option<String>,
-        /// Go back to the tuned JVM flags.
-        #[arg(long)]
-        default_flags: bool,
-    },
-    /// Run a server with a Java binary of your choice, or go back to the Java Core manages.
-    #[command(group(ArgGroup::new("java").required(true)))]
-    Java {
-        server: String,
-        /// The Java binary. It runs as the copal-servers account.
-        #[arg(group = "java")]
-        path: Option<String>,
-        /// Use the Java Core manages for the server's Minecraft version.
-        #[arg(long, group = "java")]
-        managed: bool,
-    },
-    /// Show or change when a server restarts by itself.
-    Restarts {
-        server: String,
-        /// Start the server again after a crash.
-        #[arg(long)]
-        crash: Option<Switch>,
-        /// Restart every day at this time (HH:MM, this machine's time), with a countdown in the
-        /// game.
-        #[arg(long, conflicts_with = "no_schedule")]
-        at: Option<TimeOfDay>,
-        /// With --at: restart weekly on this day instead of daily.
-        #[arg(long, requires = "at")]
-        on: Option<Weekday>,
-        /// No scheduled restarts.
-        #[arg(long)]
-        no_schedule: bool,
-        /// Experimental: restart when nobody is online and the server has run this many hours.
-        #[arg(long, conflicts_with = "no_smart")]
-        smart: Option<u32>,
-        /// No smart restarts.
-        #[arg(long)]
-        no_smart: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-pub enum ConsoleCommand {
-    /// Follow a server's console. Lines you type are sent to the server. Ctrl+C to leave.
-    Attach { server: String },
-    /// Send one command to a server, such as `say hello`.
-    Send {
-        server: String,
-        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
-        command: Vec<String>,
-    },
-}
-
-/// `copal servers ...`, except `console attach`.
-pub async fn run(client: &Client, command: ServersCommand) -> Result<Output> {
-    match command {
-        ServersCommand::List => {
-            let servers = list(client).await?;
-            Ok(Output::new(table(&servers), &servers))
-        }
-        ServersCommand::Create {
-            name,
-            version,
-            accept_eula,
-        } => {
-            if accept_eula {
-                call::<AcceptEula>(client, &(), &(), Empty).await?;
-            }
-            let created = call::<CreateServer>(
-                client,
-                &(),
-                &(),
-                Json(NewServer { name }),
-            )
-            .await?;
-            let id = created.id.clone();
-            let installed = client
-                .op(|op| {
-                    call::<InstallLoader>(
-                        client,
-                        &created,
-                        &(),
-                        Json(LoaderInstall {
-                            loader: Loader::Vanilla,
-                            loader_version: None,
-                            game_version: version.clone(),
-                            op,
-                        }),
-                    )
-                })
-                .await;
-            // The server exists from here on, so a failed install names it and how to remove it.
-            // `--json` keeps the shape of every other failure, with the server's id added.
-            if let Err(error) = installed {
-                let mut json = super::json_for(&error);
-                json["id"] = id.clone().into();
-                return Ok(Output::failed(
-                    format!(
-                        "Created server {id}, but installing Minecraft {version} failed: {error:#}\nDelete it with: copal servers delete {id}"
-                    ),
-                    &json,
-                ));
-            }
-            Ok(Output::new(
-                format!(
-                    "Created server {id} with Minecraft {version}. Start it with: copal servers start {id}"
-                ),
-                &created,
-            ))
-        }
-        ServersCommand::Delete { server } => {
-            let server = find(client, &server).await?;
-            call::<DeleteServer>(client, &id(&server), &(), Empty).await?;
-            Ok(Output::new(
-                format!("Deleted {} ({})", server.name, server.server_id),
-                &server,
-            ))
-        }
-        ServersCommand::Start { server } => {
-            let server = find(client, &server).await?;
-            power(client, &server, PowerAction::Start).await?;
-            done(client, &server, "is running").await
-        }
-        ServersCommand::Stop { server } => {
-            let server = find(client, &server).await?;
-            power(client, &server, PowerAction::Stop).await?;
-            eprintln!("Stopping {}...", server.name);
-            wait_offline(client, &server).await
-        }
-        ServersCommand::Kill { server } => {
-            let server = find(client, &server).await?;
-            power(client, &server, PowerAction::Kill).await?;
-            wait_offline(client, &server).await
-        }
-        ServersCommand::Restart { server } => {
-            let server = find(client, &server).await?;
-            power(client, &server, PowerAction::Restart).await?;
-            done(client, &server, "is running again").await
-        }
-        ServersCommand::Console(ConsoleCommand::Send { server, command }) => {
-            let server = find(client, &server).await?;
-            let command = command.join(" ");
-            send(client, &server, &command).await?;
-            Ok(Output::new(
-                format!("Sent to {}: {command}", server.name),
-                &contracts::core::ConsoleCommand { command },
-            ))
-        }
-        ServersCommand::Console(ConsoleCommand::Attach { .. }) => {
-            unreachable!("attach streams; see attach")
-        }
-        ServersCommand::Info { server } => {
-            let server = find(client, &server).await?;
-            let insight =
-                call::<GetInsight>(client, &id(&server), &(), Empty).await?;
-            Ok(Output::new(describe(&server, &insight), &insight))
-        }
-        ServersCommand::Memory {
-            server,
-            mb,
-            flags,
-            default_flags,
-        } => {
-            let server = find(client, &server).await?;
-            let mut performance =
-                call::<GetPerformance>(client, &id(&server), &(), Empty)
-                    .await?;
-            if let Some(memory_mb) = mb {
-                let memory = Memory { memory_mb };
-                performance =
-                    call::<SetMemory>(client, &id(&server), &(), Json(memory))
-                        .await?;
-            }
-            let changed = mb.is_some() || flags.is_some() || default_flags;
-            if flags.is_some() || default_flags {
-                let flags = flags.map(|flags| {
-                    flags.split_whitespace().map(str::to_owned).collect()
-                });
-                let flags = JvmFlags { flags };
-                performance =
-                    call::<SetFlags>(client, &id(&server), &(), Json(flags))
-                        .await?;
-            }
-            let later = changed && is_up(server.power_state);
-            let mut lines = vec![
-                format!(
-                    "{}: up to {} MB{}",
-                    server.name,
-                    performance.memory_mb,
-                    if later { ", from its next start" } else { "" }
-                ),
-                format!(
-                    "  {} flags: {}",
-                    if performance.custom_flags {
-                        "own"
-                    } else {
-                        "tuned"
-                    },
-                    performance.flags.join(" ")
-                ),
-            ];
-            let machine = call::<GetMachine>(client, &(), &(), Empty).await?;
-            lines.extend(machine.warning);
-            Ok(Output::new(lines.join("\n"), &performance))
-        }
-        ServersCommand::Java {
-            server,
-            path,
-            managed: _,
-        } => {
-            let server = find(client, &server).await?;
-            let body = JavaPath { path: path.clone() };
-            call::<SetJava>(client, &id(&server), &(), Json(body.clone()))
-                .await?;
-            let text = match path {
-                Some(path) => format!("{} runs {path}", server.name),
-                None => format!("{} runs the Java Core manages", server.name),
-            };
-            Ok(Output::new(text, &body))
-        }
-        ServersCommand::Restarts {
-            server,
-            crash,
-            at,
-            on,
-            no_schedule,
-            smart,
-            no_smart,
-        } => {
-            let server = find(client, &server).await?;
-            let mut performance =
-                call::<GetPerformance>(client, &id(&server), &(), Empty)
-                    .await?;
-            let restarts = &mut performance.restarts;
-            let before = restarts.clone();
-            if let Some(crash) = crash {
-                restarts.crash = crash.into();
-            }
-            if let Some(at) = at {
-                restarts.schedule = Some(match on {
-                    Some(on) => Schedule::Weekly { on, at },
-                    None => Schedule::Daily { at },
-                });
-            }
-            if no_schedule {
-                restarts.schedule = None;
-            }
-            if smart.is_some() {
-                restarts.smart_after_hours = smart;
-            }
-            if no_smart {
-                restarts.smart_after_hours = None;
-            }
-            if *restarts != before {
-                let restarts = restarts.clone();
-                performance = call::<SetRestarts>(
-                    client,
-                    &id(&server),
-                    &(),
-                    Json(restarts),
-                )
-                .await?;
-            }
-            let restarts = &performance.restarts;
-            let schedule = match restarts.schedule {
-                None => "none".to_owned(),
-                Some(Schedule::Daily { at }) => {
-                    format!("daily at {}", String::from(at))
-                }
-                Some(Schedule::Weekly { on, at }) => format!(
-                    "{} at {}",
-                    format!("{on:?}").to_lowercase(),
-                    String::from(at)
-                ),
-            };
-            let smart = restarts
-                .smart_after_hours
-                .map_or("off".to_owned(), |hours| {
-                    format!("when empty after {hours} hours")
-                });
-            Ok(Output::new(
-                format!(
-                    "{}\n  after a crash: {}\n  scheduled: {schedule}\n  smart: {smart}",
-                    server.name,
-                    on_off(restarts.crash)
-                ),
-                &performance,
-            ))
-        }
+/// `copal list`.
+pub async fn list(ui: &Ui, client: &Client) -> Result<Done> {
+    ui.intro("copal list");
+    let servers = all(client).await?;
+    if servers.is_empty() {
+        ui.outro(NO_SERVERS);
+        return Ok(Done::ok(&servers));
     }
-}
-
-/// `copal servers info` as text.
-fn describe(server: &Server, insight: &ServerInsight) -> String {
-    let mut lines = vec![format!(
-        "{}  {}  port {}",
-        server.name,
-        state_name(server.power_state),
-        server.net.game_port
-    )];
-    if is_up(server.power_state) {
-        let players = if insight.players.is_empty() {
-            "nobody".to_owned()
+    if ui.terminal() {
+        ui.say(
+            Mark::Done,
+            format!("{}\n{}", count(&servers), table(&servers, true)),
+        );
+        let up = servers
+            .iter()
+            .filter(|server| is_up(server.power_state))
+            .count();
+        ui.outro(if up == 0 {
+            "Start one with: copal start"
+        } else if up == servers.len() {
+            "Stop one with: copal stop"
         } else {
-            insight.players.join(", ")
-        };
-        let checked = if insight.players_checked {
-            ""
-        } else {
-            " (not checked yet)"
-        };
-        lines.push(format!("  online{checked}: {players}"));
-        lines.push(if insight.frozen {
-            format!(
-                "  FROZEN: it stopped answering. Restart it with: copal servers restart {}",
-                server.server_id
-            )
-        } else if insight.answered_at.is_some() {
-            "  answering".into()
-        } else {
-            "  answering: not known yet".into()
+            "Start or stop one with: copal start, copal stop"
         });
+    } else {
+        ui.say(Mark::Done, table(&servers, false));
     }
-    if insight.crash_restart_stopped {
-        lines.push(
-            "  crashed 3 times in 10 minutes, so Core left it stopped".into(),
-        );
+    Ok(Done::ok(&servers))
+}
+
+pub const NO_SERVERS: &str = "No servers yet. Create one in Amberite.";
+
+/// `2 servers, 1 running`.
+pub fn count(servers: &[Server]) -> String {
+    let running = servers
+        .iter()
+        .filter(|server| is_up(server.power_state))
+        .count();
+    let total = servers.len();
+    format!(
+        "{total} server{}, {running} running",
+        if total == 1 { "" } else { "s" }
+    )
+}
+
+/// One line per server: name, state, what it runs, its port, and who is online. `drawn` is for a
+/// terminal: a heading, and a coloured dot for each state. Without it the columns are
+/// separated by tabs and end with the start of the id, which names the server on the command
+/// line.
+pub fn table(servers: &[Server], drawn: bool) -> String {
+    let width = |title: &str, of: fn(&Server) -> String| {
+        servers
+            .iter()
+            .map(|server| of(server).chars().count())
+            .chain([title.len()])
+            .max()
+            .unwrap_or(0)
+    };
+    let name_width = width("NAME", |server| super::safe(&server.name));
+    let runs_width = width("RUNS", runs);
+    let mut lines = Vec::new();
+    if drawn {
+        lines.push(ui::dim(format!(
+            "  {:<name_width$}  {:<8}  {:<runs_width$}  PORT   ONLINE",
+            "NAME", "STATE", "RUNS"
+        )));
     }
-    if let Some(crash) = &insight.last_crash {
-        let code = crash
-            .exit_code
-            .map_or("none".to_owned(), |code| code.to_string());
-        lines.push(format!(
-            "  last crash: {}, exit code {code}",
-            super::local_time(crash.at)
-        ));
-        // A crash's lines are the server's console, escaped as `console attach` does.
-        let last: Vec<&str> = crash.last_lines.lines().collect();
-        let start = last.len().saturating_sub(5);
-        lines.extend(
-            last[start..]
-                .iter()
-                .map(|line| format!("    {}", super::safe(line))),
-        );
-    }
-    if let Some(reach) = &insight.reachability {
-        let state = match reach.state {
-            Reach::Reachable => "reachable",
-            Reach::Unverified => "forwarded",
-            Reach::Unreachable => "NOT reachable",
-        };
-        lines.push(format!("  {state}: {}", reach.title));
-        lines.extend(
-            reach.next_step.iter().map(|step| format!("  next: {step}")),
-        );
-    }
+    lines.extend(servers.iter().map(|server| {
+        let name = super::safe(&server.name);
+        let state = state_name(server.power_state);
+        let runs = runs(server);
+        let port = server.net.game_port;
+        if drawn {
+            let online = match server.players.as_deref() {
+                None => String::new(),
+                Some([]) => ui::dim("nobody"),
+                // A full server's names would run off the screen.
+                Some([first, second, _, rest @ ..]) => super::safe(&format!(
+                    "{first}, {second} +{}",
+                    rest.len() + 1
+                )),
+                Some(players) => super::safe(&players.join(", ")),
+            };
+            format!(
+                "{} {name:<name_width$}  {state:<8}  {runs:<runs_width$}  {port:<5}  {online}",
+                dot(server.power_state),
+            )
+        } else {
+            // Tabs, so a name or a loader with a space in it is still one column.
+            [
+                name.as_str(),
+                state,
+                runs.as_str(),
+                &port.to_string(),
+                &super::safe(
+                    &server.players.as_deref().unwrap_or_default().join(","),
+                ),
+                &server.server_id[..server.server_id.len().min(8)],
+            ]
+            .join("\t")
+        }
+    }));
     lines.join("\n")
+}
+
+/// What a server runs: `Fabric 1.21.1`.
+fn runs(server: &Server) -> String {
+    match (&server.loader, &server.mc_version) {
+        (Some(loader), Some(version)) => format!("{loader:?} {version}"),
+        (None, Some(version)) => version.clone(),
+        _ => "not set up".into(),
+    }
+}
+
+fn dot(state: ServerPower) -> String {
+    let on = ui::glyph("●", "*");
+    match state {
+        ServerPower::Running => ui::green(on),
+        ServerPower::Starting | ServerPower::Stopping => ui::yellow(on),
+        ServerPower::Crashed => ui::red(ui::glyph("✖", "x")),
+        // The same dot, dim: a hollow one is what a list to pick from marks its rows with.
+        ServerPower::Stopped | ServerPower::Killed => ui::dim(on),
+    }
+}
+
+/// `copal start`.
+pub async fn start(
+    ui: &Ui,
+    client: &Client,
+    server: Option<String>,
+    accept_eula: bool,
+) -> Result<Done> {
+    ui.intro("copal start");
+    let servers = all(client).await?;
+    if servers.is_empty() {
+        ui.outro(NO_SERVERS);
+        return Ok(Done::failed(&servers));
+    }
+    let server = match server {
+        Some(query) => pick(servers, &query)?,
+        None => {
+            let stopped: Vec<Server> = servers
+                .into_iter()
+                .filter(|server| !is_up(server.power_state))
+                .collect();
+            if stopped.is_empty() {
+                ui.outro("Every server is already running.");
+                return Ok(Done::ok(&stopped));
+            }
+            choose(ui, "Which server do you want to start?", stopped, "start")?
+        }
+    };
+    if is_up(server.power_state) {
+        ui.outro(format!(
+            "{} is already {}.",
+            super::safe(&server.name),
+            state_name(server.power_state)
+        ));
+        return Ok(Done::ok(&server));
+    }
+    if !server.eula_accepted {
+        accept(ui, client, accept_eula).await?;
+    }
+    let name = super::safe(&server.name);
+    let spinner = ui.spinner(format!("Starting {name}"));
+    if let Err(error) = power(client, &server, PowerAction::Start).await {
+        spinner.clear();
+        return Err(error.wrap_err(format!("{name} did not start")));
+    }
+    let server = call::<GetServer>(client, &id(&server), &(), Empty).await?;
+    spinner.done(format!("Started {name} on port {}", server.net.game_port));
+    if ui.terminal() {
+        ui.outro("Its world is still loading. Stop it with: copal stop");
+    }
+    Ok(Done::ok(&server))
+}
+
+/// No server starts before the owner accepts the Minecraft EULA, once for every server.
+async fn accept(ui: &Ui, client: &Client, flag: bool) -> Result<()> {
+    if !flag {
+        let eula = call::<GetEula>(client, &(), &(), Empty).await?;
+        if !ui.terminal() {
+            bail!(
+                "servers start once you accept the Minecraft EULA ({}). Pass --accept-eula to accept it, or accept it in Amberite",
+                eula.url
+            );
+        }
+        ui.say(
+            Mark::Info,
+            format!(
+                "Minecraft servers need you to accept the Minecraft EULA first.\n{}",
+                eula.url
+            ),
+        );
+        let question =
+            "Do you accept the Minecraft EULA, for every server on this Core?";
+        if !ui.confirm(question, "--accept-eula")? {
+            bail!(
+                "the server was not started: the Minecraft EULA is not accepted"
+            );
+        }
+    }
+    call::<AcceptEula>(client, &(), &(), Empty).await?;
+    Ok(())
+}
+
+/// `copal stop`.
+pub async fn stop(
+    ui: &Ui,
+    client: &Client,
+    server: Option<String>,
+    every: bool,
+    kill: bool,
+    yes: bool,
+) -> Result<Done> {
+    ui.intro("copal stop");
+    let servers = all(client).await?;
+    let running = |servers: Vec<Server>| -> Vec<Server> {
+        servers
+            .into_iter()
+            .filter(|server| is_up(server.power_state))
+            .collect()
+    };
+    let chosen = match server {
+        Some(query) => {
+            let server = pick(servers, &query)?;
+            if !is_up(server.power_state) {
+                ui.outro(format!(
+                    "{} is already stopped.",
+                    super::safe(&server.name)
+                ));
+                return Ok(Done::ok(&server));
+            }
+            vec![server]
+        }
+        None => {
+            let running = running(servers);
+            if running.is_empty() {
+                ui.outro("No server is running.");
+                return Ok(Done::ok(&running));
+            }
+            if every {
+                running
+            } else {
+                vec![choose(
+                    ui,
+                    "Which server do you want to stop?",
+                    running,
+                    "stop",
+                )?]
+            }
+        }
+    };
+    let (action, doing) = if kill {
+        (PowerAction::Kill, "Ending")
+    } else {
+        (PowerAction::Stop, "Stopping")
+    };
+    let mut stopped = Vec::new();
+    for server in &chosen {
+        let name = super::safe(&server.name);
+        // Stopping throws the players out, so someone has to mean it.
+        if let Some(players) = server.players.as_deref()
+            && !players.is_empty()
+            && !yes
+        {
+            let question = format!(
+                "{} on {name} now: {}. Stop it anyway?",
+                match players.len() {
+                    1 => "1 player is".to_owned(),
+                    count => format!("{count} players are"),
+                },
+                super::safe(&players.join(", "))
+            );
+            if !ui.confirm(&question, "--yes")? {
+                ui.outro(format!("{name} keeps running."));
+                return Ok(Done::ok(&stopped));
+            }
+        }
+        let spinner = ui.spinner(if kill {
+            format!("{doing} {name} without saving")
+        } else {
+            format!("Saving and stopping {name}")
+        });
+        if let Err(error) = power(client, server, action).await {
+            spinner.clear();
+            return Err(error.wrap_err(format!("{name} did not stop")));
+        }
+        let now = wait_offline(client, server).await?;
+        spinner.done(format!("{name} is {}", state_name(now.power_state)));
+        stopped.push(now);
+    }
+    if ui.terminal() {
+        ui.outro("Start it again with: copal start");
+    }
+    Ok(match (every, stopped.as_slice()) {
+        (false, [server]) => Done::ok(server),
+        _ => Done::ok(&stopped),
+    })
+}
+
+/// Pick one of `servers` from a list. Outside a terminal there is nobody to pick, so the
+/// answer names them.
+fn choose(
+    ui: &Ui,
+    question: &str,
+    servers: Vec<Server>,
+    command: &str,
+) -> Result<Server> {
+    let items: Vec<(usize, String, String)> = servers
+        .iter()
+        .enumerate()
+        .map(|(index, server)| {
+            // What tells two servers apart is on every row, not only the one in focus.
+            (
+                index,
+                format!(
+                    "{}  {}",
+                    super::safe(&server.name),
+                    ui::dim(format!(
+                        "{}, port {}{}",
+                        runs(server),
+                        server.net.game_port,
+                        match server.players.as_deref() {
+                            None => String::new(),
+                            Some([]) => ", nobody online".into(),
+                            Some(players) =>
+                                format!(", {} online", players.len()),
+                        }
+                    ))
+                ),
+                String::new(),
+            )
+        })
+        .collect();
+    let names: Vec<String> = servers
+        .iter()
+        .map(|server| super::safe(&server.name))
+        .collect();
+    let how = format!(
+        "Name the server: copal {command} <server>{}. It can be: {}",
+        if command == "stop" {
+            ", or stop them all: copal stop --all"
+        } else {
+            ""
+        },
+        names.join(", ")
+    );
+    let index = ui.select(question, &items, &how)?;
+    Ok(servers
+        .into_iter()
+        .nth(index)
+        .expect("an index from the list"))
 }
 
 fn id(server: &Server) -> ServerId {
@@ -429,36 +380,11 @@ fn id(server: &Server) -> ServerId {
 }
 
 /// Every server.
-pub async fn list(client: &Client) -> Result<Vec<Server>> {
+pub async fn all(client: &Client) -> Result<Vec<Server>> {
     call::<ListServers>(client, &(), &(), Empty).await
 }
 
-/// One line per server.
-pub fn table(servers: &[Server]) -> String {
-    if servers.is_empty() {
-        return "No servers yet. Create one with: copal servers create <name> --version <version>".into();
-    }
-    servers
-        .iter()
-        .map(|server| {
-            format!(
-                "{}  {:<9} {:<10} port {:<5}  {}",
-                server.server_id,
-                state_name(server.power_state),
-                server.mc_version.as_deref().unwrap_or("-"),
-                server.net.game_port,
-                server.name,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// The server `query` names: its id, the unique start of its id, or its name.
-pub async fn find(client: &Client, query: &str) -> Result<Server> {
-    pick(list(client).await?, query)
-}
-
+/// The server `query` names: its name, its id, or the unique start of its id.
 fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
     let query_lower = query.to_lowercase();
     let mut matches: Vec<Server> = servers
@@ -470,25 +396,25 @@ fn pick(servers: Vec<Server>, query: &str) -> Result<Server> {
         .collect();
     match matches.len() {
         1 => Ok(matches.remove(0)),
-        0 => bail!("there is no server {query}. See copal servers list"),
+        0 => bail!("there is no server named {query}. See copal list"),
         _ => bail!(
-            "{query} names more than one server; use more of its id. See copal servers list"
+            "{query} names more than one server. Use the start of its id from copal list instead"
         ),
     }
 }
 
-fn state_name(state: ServerPower) -> &'static str {
+pub fn state_name(state: ServerPower) -> &'static str {
     match state {
         ServerPower::Stopped => "stopped",
         ServerPower::Starting => "starting",
         ServerPower::Running => "running",
         ServerPower::Stopping => "stopping",
         ServerPower::Crashed => "crashed",
-        ServerPower::Killed => "killed",
+        ServerPower::Killed => "ended",
     }
 }
 
-fn is_up(state: ServerPower) -> bool {
+pub fn is_up(state: ServerPower) -> bool {
     matches!(
         state,
         ServerPower::Starting | ServerPower::Running | ServerPower::Stopping
@@ -513,114 +439,29 @@ async fn power(
         .await
 }
 
-/// The server as it is now, with `what` said about it.
-async fn done(client: &Client, server: &Server, what: &str) -> Result<Output> {
-    let server = call::<GetServer>(client, &id(server), &(), Empty).await?;
-    Ok(Output::new(format!("{} {what}", server.name), &server))
-}
-
 /// Wait, with no time limit, until the server's Java has exited.
-async fn wait_offline(client: &Client, server: &Server) -> Result<Output> {
+async fn wait_offline(client: &Client, server: &Server) -> Result<Server> {
     loop {
         let now = call::<GetServer>(client, &id(server), &(), Empty).await?;
         if !is_up(now.power_state) {
-            return Ok(Output::new(
-                format!("{} is {}", now.name, state_name(now.power_state)),
-                &now,
-            ));
+            return Ok(now);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
-/// Send one console command and wait for Core to say it passed it on.
-async fn send(client: &Client, server: &Server, command: &str) -> Result<()> {
-    let command = contracts::core::ConsoleCommand {
-        command: command.to_owned(),
-    };
-    call::<SendCommand>(client, &id(server), &(), Json(command)).await
-}
-
-/// An `/events` message, with only what the CLI shows.
-#[derive(Debug, Deserialize)]
-struct Event {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    payload: Payload,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct Payload {
-    message: Option<String>,
-}
-
-/// `copal servers console attach`: print the console as it comes, and send each line typed.
-/// With `--json`, each event is printed as Core sent it. Console text is the server's and its
-/// mods', so it is escaped before it reaches the terminal (see `safe`). A line Core refuses
-/// says why on stderr.
-pub async fn attach(client: &Client, server: &str, json: bool) -> Result<()> {
-    let server = find(client, server).await?;
-    let mut console = client.console(&server.server_id).await?;
-    eprintln!(
-        "Attached to {}. Lines you type go to the server; Ctrl+C leaves it running.",
-        server.name
-    );
-    let (typed, mut lines) = tokio::sync::mpsc::channel::<String>(16);
-    // A thread of its own, so a pending read never holds the process open.
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lines().map_while(Result::ok) {
-            if typed.blocking_send(line).is_err() {
-                return;
-            }
-        }
-    });
-    // One future for the whole session: a Ctrl+C that arrives while a line prints still counts.
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
-    loop {
-        tokio::select! {
-            message = console.next() => match message {
-                Some(Ok(Message::Text(text))) => {
-                    let event = serde_json::from_str::<Event>(&text);
-                    if json {
-                        println!("{text}");
-                    } else if let Ok(Event { kind, payload: Payload { message: Some(line) } }) = &event
-                        && kind == "log"
-                    {
-                        println!("{}", super::safe(line));
-                    }
-                }
-                Some(Ok(Message::Close(_))) | None => {
-                    eprintln!("The console closed.");
-                    return Ok(());
-                }
-                Some(Ok(_)) => {}
-                Some(Err(error)) => return Err(error.into()),
-            },
-            Some(line) = lines.recv() => {
-                if !line.trim().is_empty()
-                    && let Err(error) = send(client, &server, &line).await
-                {
-                    eprintln!("Not sent: {error}");
-                }
-            }
-            _ = &mut ctrl_c => return Ok(()),
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
-    fn server(id: &str, name: &str) -> Server {
+    pub fn server(id: &str, name: &str) -> Server {
         serde_json::from_value(serde_json::json!({
             "server_id": id, "name": name, "owner_id": null, "status": "available",
             "loader": null, "loader_version": null, "mc_version": null, "upstream": null,
             "flows": {"intro": true}, "icon": null,
             "net": {"ip": null, "port": 25565, "outside": null, "game_port": 25565},
-            "power_state": "stopped", "linked_instance": null, "shared_instance_id": null,
+            "power_state": "stopped", "linked_instance": null, "uploaded_modpack": null,
+            "shared_instance_id": null,
             "reachability": null, "players": null, "memory_mb": 2048,
             "created_at": "1970-01-01T00:00:00Z", "update_channel": "release",
             "eula_accepted": false
@@ -640,5 +481,24 @@ mod tests {
         assert_eq!(pick(servers(), "creative").unwrap().name, "Creative");
         assert!(pick(servers(), "a1b2").is_err(), "ambiguous");
         assert!(pick(servers(), "nope").is_err());
+    }
+
+    #[test]
+    fn the_plain_table_names_each_server_by_the_start_of_its_id() {
+        let mut running =
+            server("a1b2c3d4-0000-4000-8000-000000000001", "Survival");
+        running.power_state = ServerPower::Running;
+        running.mc_version = Some("1.21.1".into());
+        running.players = Some(vec!["Steve".into(), "Alex".into()]);
+        let servers = [
+            running,
+            server("ffff0000-0000-4000-8000-000000000002", "Mini"),
+        ];
+        assert_eq!(
+            table(&servers, false),
+            "Survival\trunning\t1.21.1\t25565\tSteve,Alex\ta1b2c3d4\n\
+             Mini\tstopped\tnot set up\t25565\t\tffff0000"
+        );
+        assert_eq!(count(&servers), "2 servers, 1 running");
     }
 }

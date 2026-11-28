@@ -104,6 +104,10 @@ crate::endpoints! {
     GetLogs: Get "/logs", Session, (), LogsQuery, Empty => Json<CoreLogs>;
     /// The machine the Core runs on.
     GetMachine: Get "/machine", Session, (), (), Empty => Json<Machine>;
+    /// Check the Core's pairing, its link to the backend, its ports, Java and disk, now.
+    GetDoctor: Get "/doctor", Session, (), (), Empty => Json<Doctor>, untimed;
+    /// What takes up space on the Core's disk, measured now.
+    GetDiskUsage: Get "/disk", Session, (), (), Empty => Json<DiskUsage>, untimed;
     /// Every server on this Core.
     ListServers: Get "/servers", Session, (), (), Empty => Json<Vec<Server>>;
     /// An empty server, to install a loader or pack on.

@@ -1,6 +1,7 @@
-//! `copal install` and `copal uninstall`, each run once as admin. Install creates the two
+//! `copal setup` and `copal uninstall`, each run once as admin. Setup creates the two
 //! accounts, the data folder with its permissions, the rights to start Java as `copal-servers`,
-//! the firewall rules, and the service. Nothing runs as admin after that.
+//! the firewall rules, and the service. Nothing runs as admin after that but
+//! `copal doctor --fix`, which repairs the firewall rules and starts the service.
 
 #[cfg(unix)]
 use std::path::Path;
@@ -16,7 +17,13 @@ use super::{
     paths::Paths,
     service,
 };
-use crate::network::firewall;
+use crate::{
+    cli::{
+        Done,
+        ui::{Mark, Ui},
+    },
+    network::firewall,
+};
 
 /// The helper `copal` runs through `sudo` to become `copal-servers`, and the only program the
 /// sudoers file allows. It prints its pid, which the program it runs keeps, so the shim knows
@@ -26,7 +33,7 @@ pub const HELPER: &str = "/usr/local/lib/copal/run-as-servers";
 
 #[cfg(unix)]
 const HELPER_SCRIPT: &str = "#!/bin/sh\n\
-# Installed by `copal install`. sudoers lets the copal account run this, only as copal-servers.\n\
+# Installed by `copal setup`. sudoers lets the copal account run this, only as copal-servers.\n\
 umask 007\n\
 echo \"copal-pid $$\" >&2\n\
 exec \"$@\"\n";
@@ -34,14 +41,14 @@ exec \"$@\"\n";
 #[cfg(unix)]
 const SUDOERS: &str = "/etc/sudoers.d/copal";
 
-/// What install recorded, in `db/install.toml`. Only `copal` and admins can read it.
+/// What setup recorded, in `db/install.toml`. Only `copal` and admins can read it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallRecord {
-    /// The OS id of the account that ran install: a uid on Linux and macOS, a SID on Windows.
+    /// The OS id of the account that ran setup: a uid on Linux and macOS, a SID on Windows.
     /// Recorded explicitly, so `sudo` or SSH cannot confuse who it is. Only this account and
     /// `copal` may open the local socket.
     pub owner: String,
-    /// Core's port when install opened the firewall, so uninstall closes the same rule.
+    /// Core's port when setup opened the firewall, so uninstall closes the same rule.
     pub port: u16,
     /// Windows: the password of `copal-servers`, which the shim needs to log on as it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,7 +56,7 @@ pub struct InstallRecord {
 }
 
 impl InstallRecord {
-    /// The record, or `None` when Copal was never installed on this data folder. An account
+    /// The record, or `None` when Core was never set up on this data folder. An account
     /// that cannot read it is told so: only `copal` and admins may.
     pub fn load(paths: &Paths) -> Result<Option<Self>> {
         let path = paths.install_record();
@@ -66,8 +73,8 @@ impl InstallRecord {
                 if error.kind() == std::io::ErrorKind::PermissionDenied =>
             {
                 bail!(
-                    "Copal is installed on this machine and its data folder belongs to the {CORE} account. \
-                     Use the service, or the copal CLI commands, instead of running Core yourself"
+                    "Core is set up on this machine and its data folder belongs to the {CORE} account. \
+                     Use the service, or the copal commands, instead of running Core yourself"
                 )
             }
             Err(error) => Err(error)
@@ -98,21 +105,33 @@ impl InstallRecord {
     }
 }
 
-/// `copal install`. `owner` names the account that may use the CLI; by default the one that
-/// ran install (through `sudo`, the one that ran `sudo`). Refuses while a server runs, like
-/// uninstall: it replaces the binary shims run from and resets the accounts' passwords.
-pub fn install(owner: Option<&str>, allow_downgrade: bool) -> Result<()> {
+/// `copal setup`, which the installer runs once. `owner` names the account that may use the
+/// CLI; by default the one that ran setup (through `sudo`, the one that ran `sudo`). Run again
+/// on a Core that is set up, it changes nothing and points at `copal doctor`, which repairs.
+pub fn setup(
+    ui: &Ui,
+    owner: Option<&str>,
+    allow_downgrade: bool,
+) -> Result<Done> {
+    ui.intro("copal setup");
     require_admin()?;
-    refuse_data_dir_override("install")?;
+    refuse_data_dir_override("setup")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
+    if service::state() != service::State::NotRegistered
+        && InstallRecord::load(&paths)?.is_some()
+    {
+        ui.say(Mark::Done, "Core is already set up on this computer.");
+        ui.outro("Check it, and repair what is wrong, with: copal doctor");
+        return Ok(Done::ok(&serde_json::json!({ "set_up": false })));
+    }
     if !allow_downgrade {
         refuse_older_than_active(&paths)?;
     }
 
     // Core must not run while its binary is replaced and its folders change hands. The binary
     // goes first, so a replacement that fails has not touched any account or password.
-    stop_core_with_no_servers(&paths, "install")?;
+    stop_core_with_no_servers(&paths, "setup")?;
     let exe = match install_binary() {
         Ok(exe) => exe,
         Err(error) => {
@@ -120,26 +139,40 @@ pub fn install(owner: Option<&str>, allow_downgrade: bool) -> Result<()> {
             return Err(error);
         }
     };
-    println!("Program: {}", exe.display());
-    // The program just installed runs, not a version an earlier install updated to. It is at
-    // least as new as that one (see `refuse_older_than_active`), unless the owner allowed the
+    ui.say(Mark::Done, format!("Program: {}", exe.display()));
+    // The program just set up runs, not a version an earlier Core updated to. It is at least
+    // as new as that one (see `refuse_older_than_active`), unless the owner allowed the
     // downgrade.
     crate::update::versions::save(&paths, None)?;
     let created = accounts::create()?;
-    println!("Accounts: {CORE} and {SERVERS}, without interactive sign-in");
+    ui.say(
+        Mark::Done,
+        format!("Accounts: {CORE} and {SERVERS}, which nobody can sign in to"),
+    );
     let owner = match owner {
         Some(name) => accounts::id_of(name)?,
         None => accounts::current_id()?,
     };
-    println!("Owner: {owner} may use the copal CLI");
+    ui.say(
+        Mark::Done,
+        format!("Owner: {owner} may use the copal command"),
+    );
     #[cfg(unix)]
     {
         install_sudoers()?;
-        println!("sudoers: {CORE} may run {HELPER} as {SERVERS}, nothing else");
+        ui.say(
+            Mark::Done,
+            format!(
+                "sudoers: {CORE} may run {HELPER} as {SERVERS}, nothing else"
+            ),
+        );
     }
 
     folders::create(&paths, Some(&created.accounts))?;
-    println!("Data folder: {}", paths.root().display());
+    ui.say(
+        Mark::Done,
+        format!("Data folder: {}", paths.root().display()),
+    );
     InstallRecord {
         owner,
         port: config.port,
@@ -151,7 +184,7 @@ pub fn install(owner: Option<&str>, allow_downgrade: bool) -> Result<()> {
     .save(&paths, &created.accounts)?;
 
     for line in firewall::open(config.port)? {
-        println!("Firewall: {line}");
+        ui.say(Mark::Done, format!("Firewall: {line}"));
     }
 
     #[cfg(windows)]
@@ -159,31 +192,78 @@ pub fn install(owner: Option<&str>, allow_downgrade: bool) -> Result<()> {
     #[cfg(not(windows))]
     let core_password = None;
     match service::register(&exe, core_password) {
-        Ok(line) => println!("Service: {line}"),
+        Ok(line) => ui.say(Mark::Done, format!("Service: {line}")),
         Err(error) => bail!("could not register the service: {error:#}"),
     }
-    println!(
-        "\nCopal is installed. Run copal status for the code that makes this Core yours in Amberite."
-    );
-    Ok(())
+    ui.outro(if cfg!(windows) {
+        "Core is set up. Next: copal pair"
+    } else {
+        "Core is set up. Next, as yourself and without sudo: copal pair"
+    });
+    Ok(Done::ok(&serde_json::json!({ "set_up": true })))
 }
 
 /// `copal uninstall`. Refuses while a server runs, because its shim runs as an account this
-/// removes. `remove_data` deletes the data folder too: worlds, backups, everything.
-pub fn uninstall(remove_data: bool) -> Result<()> {
+/// removes. The data folder (worlds, backups, everything) stays unless `remove_data`; in a
+/// terminal, with neither flag, the person is asked.
+pub fn uninstall(
+    ui: &Ui,
+    remove_data: bool,
+    keep_data: bool,
+    yes: bool,
+) -> Result<Done> {
+    ui.intro("copal uninstall");
     require_admin()?;
     refuse_data_dir_override("uninstall")?;
     let config = Config::load()?;
     let paths = Paths::new(&config.data_dir);
     let record = InstallRecord::load(&paths)?;
+    let folder = paths.root().display().to_string();
 
-    stop_core_with_no_servers(&paths, "uninstall")?;
-    service::unregister()?;
-    println!("Service: removed");
+    let remove_data = if remove_data || keep_data || !ui.terminal() {
+        remove_data
+    } else {
+        ui.select(
+            &format!(
+                "What should happen to the servers, worlds and backups in {folder}?"
+            ),
+            &[
+                (
+                    false,
+                    "Keep them".to_owned(),
+                    "setting Core up again finds them".to_owned(),
+                ),
+                (
+                    true,
+                    "Delete them".to_owned(),
+                    "there is no undo".to_owned(),
+                ),
+            ],
+            "Pass --keep-data or --remove-data",
+        )?
+    };
+    let question = if remove_data {
+        "Remove Core, and delete every server, world and backup?"
+    } else {
+        "Remove Core from this computer?"
+    };
+    if !yes && !ui.confirm(question, "--yes")? {
+        ui.outro("Nothing was changed.");
+        return Ok(Done::ok(&serde_json::json!({ "uninstalled": false })));
+    }
+
+    let spinner = ui.spinner("Stopping Core");
+    if let Err(error) = stop_core_with_no_servers(&paths, "uninstall")
+        .and_then(|()| service::unregister())
+    {
+        spinner.clear();
+        return Err(error.wrap_err("Core is still set up"));
+    }
+    spinner.done("Service: removed");
 
     let port = record.as_ref().map_or(config.port, |record| record.port);
     for line in firewall::close(port)? {
-        println!("Firewall: {line}");
+        ui.say(Mark::Done, format!("Firewall: {line}"));
     }
 
     #[cfg(unix)]
@@ -196,30 +276,44 @@ pub fn uninstall(remove_data: bool) -> Result<()> {
         && dir.exists()
         && let Err(error) = std::fs::remove_dir_all(dir)
     {
-        println!(
-            "Program: could not remove {} ({error}); delete it by hand",
-            dir.display()
+        ui.say(
+            Mark::Warning,
+            format!(
+                "Program: could not remove {} ({error}). Delete it by hand.",
+                dir.display()
+            ),
         );
     }
 
     accounts::remove()?;
-    println!("Accounts: removed {CORE} and {SERVERS}");
+    ui.say(
+        Mark::Done,
+        format!("Accounts: removed {CORE} and {SERVERS}"),
+    );
 
     if remove_data {
         if paths.root().exists() {
-            std::fs::remove_dir_all(paths.root()).wrap_err_with(|| {
-                format!("could not remove {}", paths.root().display())
-            })?;
+            std::fs::remove_dir_all(paths.root())
+                .wrap_err_with(|| format!("could not remove {folder}"))?;
         }
-        println!("Data folder: removed {}", paths.root().display());
+        ui.say(Mark::Done, format!("Data folder: removed {folder}"));
+        ui.say(
+            Mark::Info,
+            "If this Core was paired, also remove it in Amberite under Settings, Cores.",
+        );
     } else {
-        println!(
-            "Data folder: kept {}. Run copal uninstall --remove-data to delete it",
-            paths.root().display()
+        ui.say(
+            Mark::Info,
+            format!(
+                "Data folder: kept {folder}, with every server, world and backup. Delete it by hand when you no longer want them."
+            ),
         );
     }
-    println!("\nCopal is uninstalled.");
-    Ok(())
+    ui.outro("Core is uninstalled.");
+    Ok(Done::ok(&serde_json::json!({
+        "uninstalled": true,
+        "data_removed": remove_data,
+    })))
 }
 
 /// Refuse to install a binary older than the version Core updated itself to: that version may
@@ -231,7 +325,7 @@ fn refuse_older_than_active(paths: &Paths) -> Result<()> {
             .is_ok_and(|active| active > current)
     {
         bail!(
-            "Core has updated itself to {}, newer than this copal ({current}), and may have changed its database past what {current} can open. Run install with copal {} or newer, or pass --allow-downgrade to install {current} anyway",
+            "Core has updated itself to {}, newer than this copal ({current}), and may have changed its database past what {current} can open. Run setup with copal {} or newer, or pass --allow-downgrade to set up {current} anyway",
             state.active,
             state.active
         );
@@ -239,7 +333,7 @@ fn refuse_older_than_active(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-/// Install and uninstall work on this machine's data folder only, never a development one.
+/// Setup and uninstall work on this machine's data folder only, never a development one.
 fn refuse_data_dir_override(command: &str) -> Result<()> {
     if std::env::var_os("CORE_DATA_DIR").is_some() {
         bail!(
@@ -258,29 +352,59 @@ fn stop_core_with_no_servers(paths: &Paths, command: &str) -> Result<()> {
     if !running.is_empty() {
         let _ = service::start();
         bail!(
-            "these servers are still running: {}. Stop them first (copal servers stop <id>), then run {command} again",
-            running.join(", ")
+            "these servers are still running: {}. Stop them first with copal stop --all{}, then run {command} again",
+            running.join(", "),
+            if cfg!(unix) { " (without sudo)" } else { "" }
         );
     }
     Ok(())
 }
 
-fn require_admin() -> Result<()> {
+/// Whether this process may change the machine: root, or an elevated admin on Windows.
+pub fn is_admin() -> bool {
     #[cfg(unix)]
     let admin = nix::unistd::geteuid().is_root();
     #[cfg(windows)]
     let admin = super::win::is_admin();
-    if !admin {
-        bail!(if cfg!(windows) {
-            "run this from a terminal opened with \"Run as administrator\""
-        } else {
-            "run this with sudo"
-        });
+    admin
+}
+
+/// Where an admin runs a command on Windows, to begin a sentence that tells someone to.
+const ADMIN_TERMINAL: &str =
+    "In a terminal opened with \"Run as administrator\"";
+
+/// A step that takes an admin, the command last so it can be copied: `Set it up with: sudo
+/// copal setup`, or on Windows the same step led by where to run it. `step` is the words
+/// before the command, such as `Set it up with`.
+pub fn as_admin(step: &str, command: &str) -> String {
+    if cfg!(windows) {
+        let mut step = step.chars();
+        let step: String = step
+            .next()
+            .map(|first| first.to_lowercase().chain(step).collect())
+            .unwrap_or_default();
+        format!("{ADMIN_TERMINAL}, {step}: {command}")
+    } else {
+        format!("{step}: sudo {command}")
+    }
+}
+
+fn require_admin() -> Result<()> {
+    if !is_admin() {
+        return Err(crate::cli::client::Stuck {
+            what: "This needs an admin.".into(),
+            next: if cfg!(windows) {
+                format!("{ADMIN_TERMINAL}, run it again.")
+            } else {
+                "Run it again with sudo.".into()
+            },
+        }
+        .into());
     }
     Ok(())
 }
 
-/// Where install puts the binary the service runs. Only admins can change it.
+/// Where setup puts the binary the service runs. Only admins can change it.
 fn program_path() -> PathBuf {
     if cfg!(windows) {
         std::env::var_os("ProgramFiles")
@@ -304,7 +428,7 @@ fn install_binary() -> Result<PathBuf> {
         std::fs::copy(&current, &staged)?;
         std::fs::rename(&staged, &target).wrap_err_with(|| {
             format!(
-                "could not replace {}. A running server still uses it; stop every server and run install again",
+                "could not replace {}. A running server still uses it; stop every server and run setup again",
                 target.display()
             )
         })?;
@@ -357,7 +481,7 @@ mod tests {
     use crate::update::versions::{self, State};
 
     #[test]
-    fn an_install_older_than_the_active_version_is_refused() {
+    fn a_setup_older_than_the_active_version_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         assert!(refuse_older_than_active(&paths).is_ok());

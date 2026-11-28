@@ -255,6 +255,8 @@ crate::endpoints! {
     ReportStorage: Post "/core/storage", CoreKey, (), (), Json<StorageReport> => Json<StorageAnswer>;
     /// Core: a server was deleted or stopped following an instance, so its players and links go.
     ForgetPlayers: Delete "/core/players", CoreKey, (), (), Json<ForgottenServer> => Empty;
+    /// Core: take itself off its account, as [`RemoveCore`] does. Its key stops working at once.
+    LeaveAccount: Delete "/core", CoreKey, (), (), Empty => Empty;
     /// Core: the share of its server `server_id`, owned by its owner. The server's existing share is
     /// answered when it has one.
     CreateServerShare: Post "/core/shares", CoreKey, (), (), Json<NewServerShare> => Json<CreatedId>;

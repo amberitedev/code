@@ -7,6 +7,8 @@
 pub mod activity;
 pub mod backups;
 pub mod console;
+pub mod disk;
+pub mod doctor;
 mod engine_mount;
 pub mod eula;
 pub mod events;
@@ -193,7 +195,10 @@ fn untimed_routes<M: Mount<Shared>>(mount: M) -> M {
         // A push uploads the server's files and waits for the store to confirm them.
         .endpoint::<ShareServer, _, _>(servers::share)
         // Following an instance reads its share's version first.
-        .endpoint::<FollowInstance, _, _>(follow::follow);
+        .endpoint::<FollowInstance, _, _>(follow::follow)
+        // Asks the router and the backend, and measures folders, now.
+        .endpoint::<GetDoctor, _, _>(doctor::get)
+        .endpoint::<GetDiskUsage, _, _>(disk::get);
     // Adding and updating addons download them first, as does taking the pack's version of an
     // edited file, and a pack's install or update backs the world up first. Reading, unpacking,
     // zipping, uploading and exporting files go through them whole.

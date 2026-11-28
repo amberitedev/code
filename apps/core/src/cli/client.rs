@@ -6,7 +6,7 @@ use bytes::Bytes;
 use color_eyre::eyre::{Result, WrapErr, bail};
 use contracts::{
     ApiError, Empty,
-    core::{CheckHealth, ClientMessage, CoreEvent, Topic},
+    core::{CheckHealth, CoreEvent},
 };
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
@@ -14,7 +14,7 @@ use tokio_tungstenite::WebSocketStream;
 
 use crate::{
     access::local::{self, Stream},
-    daemon::{config, paths::Paths},
+    daemon::{config, install, paths::Paths, service},
 };
 
 /// Core answered with an error.
@@ -24,21 +24,50 @@ pub struct Refused(pub ApiError);
 
 /// Core could not be reached over the local socket.
 #[derive(Debug, thiserror::Error)]
-// `source` is printed as the cause by `{:#}`, so the message does not repeat it.
-#[error(
-    "Core is not running, or this account may not use it (could not open {path})"
-)]
-pub struct Unreachable {
-    path: String,
-    source: std::io::Error,
+#[error("Core is not running, or this account may not use it")]
+pub struct Unreachable;
+
+/// Something is in the way, and there is one thing to do about it. A terminal shows the two
+/// apart: what is wrong, then the next step where every command puts its next step.
+#[derive(Debug, thiserror::Error)]
+#[error("{what} {next}")]
+pub struct Stuck {
+    pub what: String,
+    pub next: String,
 }
+
+/// Why Core does not answer, as far as this user can tell, and the one thing to do next.
+pub fn why_unreachable() -> Stuck {
+    let (what, next) = match service::state() {
+        service::State::NotRegistered => (
+            NOT_SET_UP,
+            install::as_admin("Set it up with", "copal setup"),
+        ),
+        service::State::Stopped => {
+            (NOT_RUNNING, "Find out why with: copal doctor".to_owned())
+        }
+        service::State::Running => {
+            (NOT_ANSWERING, "Find out why with: copal doctor".to_owned())
+        }
+    };
+    Stuck {
+        what: what.into(),
+        next,
+    }
+}
+
+pub const NOT_SET_UP: &str = "Core is not set up on this computer yet.";
+pub const NOT_RUNNING: &str =
+    "Core is set up on this computer, but it is not running.";
+pub const NOT_ANSWERING: &str =
+    "Core's service runs, but it answers only the user who set it up.";
 
 /// What to say when Core drops the connection unanswered. That is how it refuses an account
 /// other than the owner's, root included, but a Core that stops mid-request looks the same, so
 /// the message says what Core does rather than claiming a refusal. Under `sudo` the way out is
 /// to run the command without it.
 fn refused_message() -> String {
-    let closed = "Core closed the connection without answering. It does that for every account but the one that installed Copal";
+    let closed = "Core closed the connection without answering. It does that for every account but the one that set it up";
     match std::env::var("SUDO_USER") {
         Ok(user) if !user.is_empty() => format!(
             "{closed}, root included: run it again without sudo, as that account (was it {user}?)"
@@ -162,34 +191,9 @@ impl Client {
         bail!("The event socket closed before the operation ended")
     }
 
-    /// The `/events` socket, subscribed to a server's console. It sends each line as the engine's
-    /// `log` event, as JSON text.
-    pub async fn console(
-        &self,
-        server_id: &str,
-    ) -> Result<WebSocketStream<Box<dyn Stream>>> {
-        use futures::SinkExt;
-        use tokio_tungstenite::tungstenite::Message;
-
-        let mut socket = self.events().await?;
-        let subscribe = ClientMessage::Subscribe {
-            topic: Topic::Console {
-                id: server_id.to_owned(),
-            },
-        };
-        socket
-            .send(Message::text(serde_json::to_string(&subscribe)?))
-            .await?;
-        Ok(socket)
-    }
-
     async fn connect(&self) -> Result<Box<dyn Stream>> {
-        local::connect(&self.paths).await.map_err(|source| {
-            Unreachable {
-                path: self.paths.local_socket().display().to_string(),
-                source,
-            }
-            .into()
-        })
+        local::connect(&self.paths)
+            .await
+            .map_err(|_| Unreachable.into())
     }
 }
