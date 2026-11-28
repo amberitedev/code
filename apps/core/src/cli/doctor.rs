@@ -72,6 +72,9 @@ enum Silent {
     /// Core answers only the user who set it up, and this is root: `sudo copal doctor`, which
     /// is how the firewall is read and repaired on Linux.
     Root,
+    /// Core answers only the user who set it up, and this is someone else.
+    Foreign,
+    /// Core answered, with an error, or with something this CLI cannot read.
     Other(String),
 }
 
@@ -79,7 +82,9 @@ impl Silent {
     fn why(&self) -> String {
         match self {
             Self::Down => "They need Core running".into(),
-            Self::Root => "Core answers only the user who set it up".into(),
+            Self::Root | Self::Foreign => {
+                "Core answers only the user who set it up".into()
+            }
             Self::Other(why) => format!("Core did not answer: {why}"),
         }
     }
@@ -310,8 +315,10 @@ async fn examine(ui: &Ui, client: &Client, admin: bool) -> Vec<Check> {
     let core = core.map_err(|error| {
         if error.is::<Unreachable>() {
             Silent::Down
-        } else if admin && error.is::<super::client::Closed>() {
-            Silent::Root
+        // Only on Linux and macOS does Core take a connection to refuse it; on Windows the
+        // pipe itself keeps other users out, and a closed connection is a Core that died.
+        } else if cfg!(unix) && error.is::<super::client::Closed>() {
+            if admin { Silent::Root } else { Silent::Foreign }
         } else {
             Silent::Other(format!("{error:#}"))
         }
@@ -496,7 +503,7 @@ fn checks(
                             .to_owned(),
                     ]
                 }
-                Silent::Down | Silent::Other(_) => vec![],
+                Silent::Down | Silent::Foreign | Silent::Other(_) => vec![],
             };
             checks.extend(CORE_CHECKS.iter().map(|name| Check {
                 unanswered: true,
@@ -558,7 +565,7 @@ async fn started(client: &Client) -> Result<(), String> {
             .await
         {
             Ok(_) => return Ok(()),
-            Err(error) if error.is::<super::client::Closed>() => {
+            Err(error) if cfg!(unix) && error.is::<super::client::Closed>() => {
                 return Ok(());
             }
             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
@@ -848,6 +855,24 @@ mod tests {
         assert!(
             plain(&checks, false)
                 .ends_with("Core answers only the user who set it up.")
+        );
+    }
+
+    /// Another user than the one who set Core up is told so, not that Core has an error.
+    #[test]
+    fn a_user_core_does_not_answer_is_told_to_use_the_one_it_does() {
+        let checks = checks(
+            service::State::Running,
+            Err(Silent::Foreign),
+            firewall::Rules::Open,
+            disk(),
+            16662,
+            false,
+        );
+        assert_eq!(checks[0].check.state, CheckState::Fail);
+        assert_eq!(
+            checks[0].check.fix[0],
+            "Use the user account that set Core up."
         );
     }
 

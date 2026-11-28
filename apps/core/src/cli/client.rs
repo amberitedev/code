@@ -73,6 +73,10 @@ pub const NOT_ANSWERING: &str =
 /// the message says what Core does rather than claiming a refusal. Under `sudo` the way out is
 /// to run the command without it.
 fn refused_message() -> String {
+    // The pipe itself keeps other users out on Windows: there, this is a Core that died.
+    if cfg!(windows) {
+        return "Core stopped answering. See why with: copal logs".into();
+    }
     let closed = "Core closed the connection without answering. It does that for every account but the one that set it up";
     match std::env::var("SUDO_USER") {
         Ok(user) if !user.is_empty() => format!(
