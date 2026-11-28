@@ -25,7 +25,7 @@
 						:class="{
 							'bg-red': item.type === 'error',
 							'bg-orange': item.type === 'warning',
-							'bg-green': item.type === 'success',
+							'bg-brand': item.type === 'success',
 							'bg-blue': !item.type || item.type === 'info',
 							'bg-transparent': item.type === 'neutral',
 						}"
@@ -39,7 +39,7 @@
 							:class="{
 								'text-red': item.type === 'error',
 								'text-orange': item.type === 'warning',
-								'text-green': item.type === 'success',
+								'text-brand': item.type === 'success',
 								'text-blue': !item.type || item.type === 'info',
 								'text-contrast': item.type === 'neutral',
 							}"

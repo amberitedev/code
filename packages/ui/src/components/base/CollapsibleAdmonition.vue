@@ -114,28 +114,28 @@ const headerBgClasses = {
 	info: 'bg-bg-blue',
 	warning: 'bg-bg-orange',
 	critical: 'bg-bg-red',
-	success: 'bg-bg-green',
+	success: 'bg-brand-highlight',
 }
 
 const iconClasses = {
 	info: 'text-brand-blue',
 	warning: 'text-brand-orange',
 	critical: 'text-brand-red',
-	success: 'text-brand-green',
+	success: 'text-brand',
 }
 
-const buttonColors: Record<string, 'blue' | 'orange' | 'red' | 'green'> = {
+const buttonColors: Record<string, 'blue' | 'orange' | 'red' | 'brand'> = {
 	info: 'blue',
 	warning: 'orange',
 	critical: 'red',
-	success: 'green',
+	success: 'brand',
 }
 
 const buttonHoverClasses = {
 	info: 'hover:bg-highlight-blue focus-visible:bg-highlight-blue',
 	warning: 'hover:bg-highlight-orange focus-visible:bg-highlight-orange',
 	critical: 'hover:bg-highlight-red focus-visible:bg-highlight-red',
-	success: 'hover:bg-highlight-green focus-visible:bg-highlight-green',
+	success: 'hover:bg-brand-highlight focus-visible:bg-brand-highlight',
 }
 </script>
 
@@ -177,15 +177,15 @@ const buttonHoverClasses = {
 }
 
 .collapsible-admonition[data-type='success'] {
-	border-color: color-mix(in srgb, var(--color-green) 60%, transparent);
+	border-color: color-mix(in srgb, var(--color-brand) 60%, transparent);
 }
 
 .collapsible-admonition[data-type='success'] .collapsible-admonition__item {
-	background: var(--color-green-bg);
+	background: var(--color-orange-bg);
 }
 
 .collapsible-admonition[data-type='success'] .collapsible-admonition__item--bordered {
-	border-top: 1px solid color-mix(in srgb, var(--color-green) 60%, transparent);
+	border-top: 1px solid color-mix(in srgb, var(--color-brand) 60%, transparent);
 }
 
 .collapsible-admonition-enter-active,

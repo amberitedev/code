@@ -394,7 +394,7 @@ defineExpose({ show })
 								/>
 								<SignalIcon
 									v-else-if="serverData[row.address]?.status"
-									class="size-4 shrink-0 text-green"
+									class="size-4 shrink-0 text-brand"
 									aria-hidden="true"
 								/>
 								<NoSignalIcon v-else class="size-4 shrink-0" aria-hidden="true" />

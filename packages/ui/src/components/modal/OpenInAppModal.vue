@@ -273,7 +273,7 @@ defineExpose({ show, hide, open })
 .fullscreen-overlay {
 	position: fixed;
 	inset: 0;
-	background: linear-gradient(to bottom, rgba(66, 131, 92, 0.23) 0%, rgba(17, 35, 43, 0.4) 97%);
+	background: linear-gradient(to bottom, rgba(255, 100, 26, 0.23) 0%, rgba(43, 24, 17, 0.4) 97%);
 	backdrop-filter: blur(12px);
 	opacity: 0;
 	transition: opacity 0.3s ease-out;
@@ -320,7 +320,7 @@ defineExpose({ show, hide, open })
 }
 
 .countdown-progress {
-	stroke: var(--color-green);
+	stroke: var(--color-brand);
 	transition: stroke-dashoffset 0.05s linear;
 }
 

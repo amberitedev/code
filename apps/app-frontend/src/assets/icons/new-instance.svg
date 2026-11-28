@@ -65,7 +65,7 @@
         transform="translate(-137.61687 -129.0053)" fill="#e6e6e6"/>
   <g id="b3812a0d-69b2-4ac3-87c4-e066c2de2dfd" data-name="Group 41">
     <circle id="fb0bff05-a63a-421c-8737-de050f830f30" data-name="Ellipse 220" cx="230.14466"
-            cy="192.37305" r="55.409" fill="var(--color-green)"/>
+            cy="192.37305" r="55.409" fill="var(--color-brand)"/>
     <path id="f9b355f0-5797-4243-8ae5-6fe77774d21b-818" data-name="Path 1106"
           d="M390.77053,316.72537h-18.839v-18.839a4.433,4.433,0,0,0-4.433-4.433h0a4.433,4.433,0,0,0-4.433,4.433v18.839h-18.839a4.433,4.433,0,0,0-4.433,4.433v0h0a4.433,4.433,0,0,0,4.433,4.433h18.839v18.839a4.433,4.433,0,0,0,4.433,4.433h0a4.433,4.433,0,0,0,4.433-4.433V325.59137h18.839a4.433,4.433,0,0,0,4.433-4.433v0h0a4.433,4.433,0,0,0-4.433-4.433h0Z"
           transform="translate(-137.61687 -129.0053)" fill="#fff"/>
@@ -110,22 +110,22 @@
     d="M307.92339,259.0595H186.61687V167.52189H307.92339ZM188.848,256.82835H305.69224V169.753H188.848Z"
     transform="translate(-137.61687 -129.0053)" fill="#e6e6e6"/>
   <rect id="e724a003-6a25-4c83-be10-32efc1fd30bf" data-name="Rectangle 342" x="64.99958"
-        y="63.44755" width="89.30624" height="5.95382" fill="var(--color-green)"/>
+        y="63.44755" width="89.30624" height="5.95382" fill="var(--color-brand)"/>
   <rect id="f16e8690-23eb-4802-9b18-78b8e9972275" data-name="Rectangle 343" x="64.99958"
-        y="81.30785" width="89.30624" height="5.95382" fill="var(--color-green)"/>
+        y="81.30785" width="89.30624" height="5.95382" fill="var(--color-brand)"/>
   <rect id="ea05cbc1-1ae7-4cbc-994d-a1c0c2d5941e" data-name="Rectangle 344" x="64.99958"
-        y="99.16937" width="89.30624" height="5.95382" fill="var(--color-green)"/>
+        y="99.16937" width="89.30624" height="5.95382" fill="var(--color-brand)"/>
   <path d="M622.73338,498.69378H437.61687V359.0053H622.73338Z"
         transform="translate(-137.61687 -129.0053)" fill="#fff"/>
   <path
     d="M622.73338,498.69378H437.61687V359.0053H622.73338ZM441.02166,495.289H619.3286V362.41009H441.02166Z"
     transform="translate(-137.61687 -129.0053)" fill="#e6e6e6"/>
   <rect id="ac8b6f6a-33b0-4e01-bc67-8452ca74a9e6" data-name="Rectangle 342" x="324.41573"
-        y="268.04521" width="136.28335" height="9.08567" fill="var(--color-green)"/>
+        y="268.04521" width="136.28335" height="9.08567" fill="var(--color-brand)"/>
   <rect id="e4f43daa-ee47-4f01-aaaf-288902bf6f27" data-name="Rectangle 343" x="324.41573"
-        y="295.30043" width="136.28335" height="9.08567" fill="var(--color-green)"/>
+        y="295.30043" width="136.28335" height="9.08567" fill="var(--color-brand)"/>
   <rect id="b40e1bee-dfb3-4798-af30-e469c9a00d65" data-name="Rectangle 344" x="324.41573"
-        y="322.55752" width="136.28335" height="9.08567" fill="var(--color-green)"/>
+        y="322.55752" width="136.28335" height="9.08567" fill="var(--color-brand)"/>
   <path
     d="M1061.19244,770.9947h-480.294a1.19069,1.19069,0,0,1,0-2.38137h480.294a1.19068,1.19068,0,1,1,0,2.38137Z"
     transform="translate(-137.61687 -129.0053)" fill="#cacaca"/>

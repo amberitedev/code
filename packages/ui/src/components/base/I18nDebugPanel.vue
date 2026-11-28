@@ -420,7 +420,7 @@ const listMaxHeight = computed(() => `${panelHeight.value - 120}px`)
 										>
 											<span
 												v-if="copiedKey === entry.key"
-												class="flex items-center gap-1 rounded-md bg-green/10 px-1.5 py-0.5 text-[10px] font-medium text-green"
+												class="flex items-center gap-1 rounded-md bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand"
 											>
 												<svg width="10" height="10" viewBox="0 0 16 16" fill="none">
 													<path
@@ -470,7 +470,7 @@ const listMaxHeight = computed(() => `${panelHeight.value - 120}px`)
 						<!-- Footer status bar -->
 						<div class="flex items-center justify-between border-t border-surface-5/50 px-3.5 py-2">
 							<div class="flex items-center gap-2">
-								<div class="h-1.5 w-1.5 rounded-full bg-green animate-pulse" />
+								<div class="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />
 								<span class="text-[11px] text-secondary"> Watching </span>
 							</div>
 							<div class="flex items-center gap-3">

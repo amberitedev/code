@@ -39,7 +39,7 @@ const layoutClass = computed(() => {
 
 const selectedIndex = computed(() => props.items.indexOf(selected.value as T))
 const indicatorTone = computed(() =>
-	props.neutralItems.includes(selected.value as T) ? 'neutral' : 'green',
+	props.neutralItems.includes(selected.value as T) ? 'neutral' : 'brand',
 )
 const leftDelay = computed(() => delays.value.left)
 const rightDelay = computed(() => delays.value.right)
@@ -122,7 +122,7 @@ onUnmounted(() => resizeObserver?.disconnect())
 			:interaction="index === selectedIndex ? 'none' : 'surface'"
 			class="relative z-[1] !rounded-[10px] !px-3 !font-medium disabled:!opacity-100"
 			:class="[
-				index === selectedIndex && indicatorTone === 'green' ? '!text-green' : '!text-contrast',
+				index === selectedIndex && indicatorTone === 'brand' ? '!text-brand' : '!text-contrast',
 				{ 'flex-1': fullWidth },
 			]"
 			:disabled="disabled"
@@ -134,9 +134,9 @@ onUnmounted(() => resizeObserver?.disconnect())
 </template>
 
 <style scoped>
-.indicator[data-tone='green'] {
-	background-color: color-mix(in srgb, var(--color-green) 30%, var(--surface-3));
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-green) 60%, transparent);
+.indicator[data-tone='brand'] {
+	background-color: color-mix(in srgb, var(--color-brand) 30%, var(--surface-3));
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-brand) 60%, transparent);
 }
 
 .indicator[data-tone='neutral'] {

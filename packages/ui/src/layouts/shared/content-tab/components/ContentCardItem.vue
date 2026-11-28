@@ -500,14 +500,14 @@ const installTooltip = computed(() => {
 							: formatMessage(commonMessages.updateAvailableLabel)
 					"
 					type="quiet"
-					color="green"
+					color="brand"
 					:label="
 						isDisabled && disabledTooltip
 							? disabledTooltip
 							: formatMessage(commonMessages.updateAvailableLabel)
 					"
 					:disabled="isDisabled"
-					class="hover:!bg-green focus-visible:!bg-green hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
+					class="hover:!bg-brand focus-visible:!bg-brand hover:!text-[var(--color-accent-contrast)] focus-visible:!text-[var(--color-accent-contrast)]"
 					@click="emit('update')"
 				>
 					<DownloadIcon class="size-5" />

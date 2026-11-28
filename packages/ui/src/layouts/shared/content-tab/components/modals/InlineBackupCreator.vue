@@ -32,7 +32,7 @@
 			<!-- Success -->
 			<div
 				v-else-if="backup.backupComplete.value"
-				class="flex items-center gap-1.5 text-sm font-medium text-green"
+				class="flex items-center gap-1.5 text-sm font-medium text-brand"
 			>
 				<CheckCircleIcon class="size-5" />
 				{{ formatMessage(messages.backupComplete) }}

@@ -51,7 +51,7 @@ export function useDeleteVersion() {
 	})
 }
 
-const SHARE_COLORS = ['bg-blue', 'bg-purple', 'bg-green', 'bg-orange', 'bg-red']
+const SHARE_COLORS = ['bg-brand', 'bg-blue', 'bg-purple', 'bg-warning', 'bg-red']
 
 /**
  * The shares that use the allowance, largest first, each with the color it has in the storage

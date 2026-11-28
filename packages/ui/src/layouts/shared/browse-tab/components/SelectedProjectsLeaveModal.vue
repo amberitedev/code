@@ -14,7 +14,7 @@
 					<TrashIcon />
 					{{ formatMessage(messages.discardButton) }}
 				</Button>
-				<Button type="colored" color="green" :disabled="installing" @click="resolve('install')">
+				<Button type="colored" color="brand" :disabled="installing" @click="resolve('install')">
 					<PlusIcon />
 					{{ formatMessage(commonMessages.installButton) }}
 				</Button>

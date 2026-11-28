@@ -16,13 +16,13 @@ const props = defineProps<{
 const RELEASE_CHANNELS = {
 	release: {
 		message: commonMessages.release,
-		bgColor: 'var(--color-green-bg)',
-		color: 'var(--color-green)',
+		bgColor: 'var(--color-brand-highlight)',
+		color: 'var(--color-brand)',
 	},
 	beta: {
 		message: commonMessages.beta,
-		bgColor: 'var(--color-orange-bg)',
-		color: 'var(--color-orange)',
+		bgColor: 'var(--color-blue-bg)',
+		color: 'var(--color-blue)',
 	},
 	alpha: {
 		message: commonMessages.alpha,

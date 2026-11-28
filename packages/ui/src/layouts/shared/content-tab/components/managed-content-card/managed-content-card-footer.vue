@@ -182,7 +182,7 @@ const showAction = computed(
 		<Button
 			v-if="showAction"
 			type="quiet"
-			:color="data.kind === 'modpack' ? undefined : 'green'"
+			:color="data.kind === 'modpack' ? undefined : 'brand'"
 			:disabled="disabled"
 			class="w-full shadow-[0_0_0_1px_var(--surface-5)] @[480px]:w-auto @[480px]:shadow-none"
 			@click="emit('primary-action', $event)"

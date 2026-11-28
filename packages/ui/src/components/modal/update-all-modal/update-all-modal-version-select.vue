@@ -29,7 +29,7 @@ const { element: versionLabel, tooltip } = useUpdateAllTruncatedTooltip(
 
 function channelClasses(channel: UpdateAllVersion['version_type']) {
 	return {
-		'!bg-highlight-green !text-green': channel === 'release',
+		'!bg-brand-highlight !text-brand': channel === 'release',
 		'!bg-highlight-orange !text-orange': channel === 'beta',
 		'!bg-highlight-red !text-red': channel === 'alpha',
 	}

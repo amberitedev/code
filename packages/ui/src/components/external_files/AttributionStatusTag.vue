@@ -39,7 +39,7 @@ const badge = computed(() => {
 			}
 		case 'attributed':
 			return {
-				style: { '--_bg-color': 'var(--color-green-bg)', '--_color': 'var(--color-green)' },
+				style: { '--_bg-color': 'var(--color-brand-highlight)', '--_color': 'var(--color-brand)' },
 				message: defineMessage({
 					id: 'external-files.permissions-card.badge.attributed',
 					defaultMessage: 'Completed',

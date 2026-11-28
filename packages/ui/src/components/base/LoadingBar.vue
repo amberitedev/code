@@ -7,7 +7,7 @@ const props = withDefaults(
 	defineProps<{
 		/** Bar height in pixels. */
 		height?: number
-		/** Background gradient. Defaults to the brand green. */
+		/** Background gradient. Defaults to the brand color. */
 		color?: string
 		/** Total bar fill duration in ms (visual progress easing). */
 		duration?: number

@@ -176,7 +176,7 @@ const typeClasses = {
 	warning: 'border-brand-orange bg-bg-orange',
 	'circle-warning': 'border-brand-orange bg-bg-orange',
 	critical: 'border-brand-red bg-bg-red',
-	success: 'border-brand-green bg-bg-green',
+	success: 'border-brand bg-brand-highlight',
 	moderation: 'border-brand-orange bg-bg-orange',
 	neutral: 'border-surface-4 bg-surface-3',
 }
@@ -186,7 +186,7 @@ const iconClasses = {
 	warning: 'text-brand-orange',
 	'circle-warning': 'text-brand-orange',
 	critical: 'text-brand-red',
-	success: 'text-brand-green',
+	success: 'text-brand',
 	moderation: 'text-brand-orange',
 	neutral: 'text-secondary',
 }
@@ -196,7 +196,7 @@ const buttonColors = {
 	warning: 'orange',
 	'circle-warning': 'orange',
 	critical: 'red',
-	success: 'green',
+	success: 'brand',
 	moderation: 'orange',
 	neutral: 'standard',
 } as const
@@ -206,7 +206,7 @@ const dismissHoverClasses: Partial<Record<NonNullable<typeof props.type>, string
 	warning: 'hover:bg-highlight-orange focus-visible:bg-highlight-orange',
 	'circle-warning': 'hover:bg-highlight-orange focus-visible:bg-highlight-orange',
 	critical: 'hover:bg-highlight-red focus-visible:bg-highlight-red',
-	success: 'hover:bg-highlight-green focus-visible:bg-highlight-green',
+	success: 'hover:bg-brand-highlight focus-visible:bg-brand-highlight',
 	moderation: 'hover:bg-highlight-orange focus-visible:bg-highlight-orange',
 }
 
@@ -215,7 +215,7 @@ const progressTrackClasses = {
 	warning: 'bg-brand-orange/20',
 	'circle-warning': 'bg-brand-orange/20',
 	critical: 'bg-brand-red/20',
-	success: 'bg-brand-green/20',
+	success: 'bg-brand/20',
 	moderation: 'bg-brand-orange/20',
 	neutral: 'bg-surface-4',
 }
@@ -225,9 +225,9 @@ const progressFillClasses = {
 	warning: 'bg-brand-orange',
 	'circle-warning': 'bg-brand-orange',
 	critical: 'bg-brand-red',
-	success: 'bg-brand-green',
+	success: 'bg-brand',
 	blue: 'bg-brand-blue',
-	green: 'bg-brand-green',
+	green: 'bg-brand',
 	red: 'bg-brand-red',
 	neutral: 'bg-surface-5',
 }

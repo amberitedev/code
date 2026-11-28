@@ -161,7 +161,7 @@ const proofImageItems = computed(() =>
 						<span class="text-contrast font-semibold flex items-center gap-2">
 							<CheckCircleIcon
 								v-if="attribution.kind === 'globally_allowed'"
-								class="text-green size-5"
+								class="text-brand size-5"
 							/>
 							<XCircleIcon v-else-if="automaticNoPermission" class="text-red size-5" />
 							{{ formatMessage(PERMISSION_REASONS[attribution.kind].label) }}

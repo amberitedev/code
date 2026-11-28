@@ -43,7 +43,7 @@ const CONTROL_SIZE = 14
 const CONTROL_TOUCH_SIZE = 24
 const MAX_RENDERED_CANVAS_PIXELS = 16_777_216
 const MIN_CROP_SIZE = 1
-const SELECTION_COLOR = '#1bd96a'
+const SELECTION_COLOR = '#ff641a'
 const CENSOR_REGENERATED_PROPERTIES = new Set([
 	'type',
 	'version',

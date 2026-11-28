@@ -55,9 +55,9 @@ const messages = defineMessages({
 			'flex font-bold justify-center items-center rounded-full',
 			sizeClasses,
 			channel === 'release'
-				? 'bg-bg-green text-brand-green'
+				? 'bg-brand-highlight text-brand'
 				: channel === 'beta'
-					? 'bg-bg-orange text-brand-orange'
+					? 'bg-bg-blue text-brand-blue'
 					: 'bg-bg-red text-brand-red',
 		]"
 	>

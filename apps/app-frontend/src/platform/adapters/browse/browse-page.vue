@@ -1090,7 +1090,7 @@ function getCardActions(
 				iconClass: showAsInstalling ? 'animate-spin' : undefined,
 				disabled:
 					showAsInstalled || isInstalling || isInstallingSelection || (isQueued && !isQueuedRoot),
-				color: isQueued && !showAsInstalling ? 'green' : 'brand',
+				color: 'brand',
 				type: 'outlined',
 				onClick: async () => {
 					if (isQueuedRoot) {

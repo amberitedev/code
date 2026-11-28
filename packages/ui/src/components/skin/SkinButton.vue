@@ -89,7 +89,7 @@ watch(
 
 		<span
 			v-if="active && !selected && !$slots['top-buttons']"
-			class="pointer-events-none absolute right-3 top-3 z-20 size-3 rounded-full border-2 border-solid border-surface-3 bg-green"
+			class="pointer-events-none absolute right-3 top-3 z-20 size-3 rounded-full border-2 border-solid border-surface-3 bg-brand"
 		></span>
 
 		<span

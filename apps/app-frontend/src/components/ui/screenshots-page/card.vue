@@ -257,7 +257,7 @@ watch(thumbnail, (url, previousUrl) => {
 					class="bg-surface-2 text-contrast hover:bg-surface-3"
 					@click="emit('copy')"
 				>
-					<CheckIcon v-if="copied" class="text-green" />
+					<CheckIcon v-if="copied" class="text-brand" />
 					<ClipboardCopyIcon v-else />
 				</IconButton>
 				<IconButton

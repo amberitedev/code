@@ -21,7 +21,7 @@ const colorClass = computed(() => {
 		case 'error':
 			return 'text-brand-red'
 		case 'success':
-			return 'text-brand-green'
+			return 'text-brand'
 		case 'checking':
 			return 'text-secondary'
 		default:
